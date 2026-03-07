@@ -4,33 +4,53 @@
 
 @layer base {
   :root {
-    --background: 248 250 252;
-    --foreground: 15 23 42;
+    --background: 249 248 251;
+    --foreground: 26 22 37;
     --card: 255 255 255;
-    --card-foreground: 15 23 42;
-    --muted: 241 245 249;
-    --muted-foreground: 100 116 139;
-    --accent: 59 130 246;
+    --card-foreground: 26 22 37;
+    --muted: 242 240 245;
+    --muted-foreground: 114 106 131;
+    --primary: 160 111 204;
+    --accent: 214 85 119;
+    --gold: 199 149 58;
   }
 
   .dark {
-    --background: 15 23 42;
-    --foreground: 248 250 252;
-    --card: 30 41 59;
-    --card-foreground: 248 250 252;
-    --muted: 51 65 85;
-    --muted-foreground: 148 163 184;
-    --accent: 96 165 250;
+    --background: 26 22 37;
+    --foreground: 242 240 245;
+    --card: 42 36 53;
+    --card-foreground: 242 240 245;
+    --muted: 90 82 105;
+    --muted-foreground: 176 169 189;
+    --primary: 188 150 223;
+    --accent: 232 120 153;
+    --gold: 217 173 83;
   }
 
   body {
-    @apply bg-surface-50 text-slate-900 dark:bg-surface-900 dark:text-slate-100;
+    @apply bg-surface-50 text-surface-900 dark:bg-surface-900 dark:text-surface-100;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    line-height: 1.7;
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-surface-800;
+    @apply rounded-2xl border border-surface-200/60 bg-white p-6 shadow-soft
+           dark:border-surface-700/40 dark:bg-surface-800;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-300 ease-out
+           hover:shadow-soft-lg hover:-translate-y-0.5
+           dark:hover:border-surface-600/50;
   }
 
   .badge {
@@ -38,40 +58,75 @@
   }
 
   .badge-gold {
-    @apply bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400;
+    @apply bg-gold-100 text-gold-800 dark:bg-gold-900/30 dark:text-gold-400;
   }
 
   .badge-silver {
-    @apply bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300;
+    @apply bg-surface-200 text-surface-600 dark:bg-surface-700 dark:text-surface-300;
   }
 
   .badge-bronze {
-    @apply bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400;
+    @apply bg-gold-100/60 text-gold-700 dark:bg-gold-900/20 dark:text-gold-500;
   }
 
   .btn {
-    @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-medium
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:ring-offset-2
+           disabled:pointer-events-none disabled:opacity-50;
   }
 
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:hover:bg-brand-600;
+    @apply btn bg-primary-600 text-white shadow-sm
+           hover:bg-primary-700 hover:shadow-md
+           dark:bg-primary-500 dark:hover:bg-primary-600;
   }
 
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-surface-800 dark:text-slate-300 dark:hover:bg-surface-700;
+    @apply btn border border-surface-200 bg-white text-surface-700
+           hover:bg-surface-50 hover:border-surface-300
+           dark:border-surface-600 dark:bg-surface-800 dark:text-surface-300
+           dark:hover:bg-surface-700 dark:hover:border-surface-500;
+  }
+
+  .btn-ghost {
+    @apply btn text-surface-600 hover:bg-surface-100 hover:text-surface-900
+           dark:text-surface-400 dark:hover:bg-surface-800 dark:hover:text-surface-100;
   }
 
   .input {
-    @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-slate-600 dark:bg-surface-800 dark:text-slate-100 dark:placeholder-slate-500;
+    @apply rounded-xl border border-surface-200 bg-white px-4 py-2.5 text-sm text-surface-900
+           placeholder-surface-400 shadow-sm
+           focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20
+           dark:border-surface-600 dark:bg-surface-800 dark:text-surface-100
+           dark:placeholder-surface-500 dark:focus:border-primary-500;
   }
 
   .rating-up {
-    @apply text-emerald-600 dark:text-emerald-400;
+    @apply text-moss-600 dark:text-moss-400;
   }
 
   .rating-down {
-    @apply text-red-600 dark:text-red-400;
+    @apply text-clay-600 dark:text-clay-400;
   }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary-300 via-accent-300 to-primary-400 bg-clip-text text-transparent;
+  }
+}
+
+/* Skeleton animation */
+.skeleton {
+  @apply animate-pulse-soft rounded-lg bg-surface-200 dark:bg-surface-700;
+}
+
+/* Hide scrollbar for horizontal filter scroll */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
 }
 
 /* Scrollbar styling */
@@ -82,5 +137,5 @@
   @apply bg-transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-slate-300 dark:bg-slate-600;
+  @apply rounded-full bg-surface-300 dark:bg-surface-600;
 }

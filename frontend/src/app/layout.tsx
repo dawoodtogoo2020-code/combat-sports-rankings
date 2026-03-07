@@ -9,6 +9,9 @@ export const metadata: Metadata = {
   description:
     "The global ranking platform for combat sports athletes. ELO-based rankings for BJJ, grappling, MMA, and more.",
   keywords: ["BJJ", "rankings", "combat sports", "ELO", "grappling", "martial arts"],
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
