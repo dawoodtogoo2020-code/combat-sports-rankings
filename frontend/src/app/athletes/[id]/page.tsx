@@ -1,7 +1,3 @@
-"use client";
-
-import { useParams } from "next/navigation";
-
 // Demo athlete data
 const athlete = {
   id: "1",
@@ -44,9 +40,11 @@ const recentMatches = [
   { opponent: "Victor Hugo", result: "W", method: "Decision", event: "WNO", eloChange: "+6" },
 ];
 
-export default function AthleteDetailPage() {
-  const params = useParams();
+export function generateStaticParams() {
+  return [{ id: "1" }, { id: "2" }, { id: "3" }];
+}
 
+export default function AthleteDetailPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       {/* Profile Header */}
