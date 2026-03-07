@@ -1,0 +1,7 @@
+event_name,event_date,event_tier,event_city,event_country,is_gi,winner_first_name,winner_last_name,winner_gender,winner_country,winner_belt,winner_gym,loser_first_name,loser_last_name,loser_gender,loser_country,loser_belt,loser_gym,outcome,submission_type,winner_score,loser_score,round_name,division_name
+ADCC Trials 2024,2024-03-15,regional,Las Vegas,US,false,Gordon,Ryan,male,US,black,New Wave Jiu-Jitsu,Felipe,Pena,male,BR,black,Dream Art BJJ,submission,Rear Naked Choke,,,Final,-99kg No-Gi
+ADCC Trials 2024,2024-03-15,regional,Las Vegas,US,false,Mica,Galvao,male,BR,black,Dream Art BJJ,Kade,Ruotolo,male,US,black,Atos Jiu-Jitsu,points,,4,2,Final,-77kg No-Gi
+ADCC Trials 2024,2024-03-15,regional,Las Vegas,US,false,Nicholas,Meregali,male,BR,black,Alliance BJJ,Kaynan,Duarte,male,BR,black,Atos Jiu-Jitsu,submission,Collar Choke,,,Semi-Final,+99kg No-Gi
+ADCC Trials 2024,2024-03-15,regional,Las Vegas,US,false,Giancarlo,Bodoni,male,US,black,New Wave Jiu-Jitsu,Victor,Hugo,male,BR,black,Alliance BJJ,points,,6,2,Quarter-Final,-99kg No-Gi
+Local Open 2024,2024-02-01,local,Miami,US,true,John,Smith,male,US,blue,,Mike,Johnson,male,US,blue,,points,,6,4,Final,Light Blue Belt
+Local Open 2024,2024-02-01,local,Miami,US,true,Sarah,Williams,female,US,purple,,Emma,Brown,female,US,purple,,submission,Armbar,,,Semi-Final,Light Purple Belt Female
