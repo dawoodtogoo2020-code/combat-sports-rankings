@@ -41,15 +41,10 @@ def get_session_factory():
     return _async_session
 
 
-# Keep these as module-level aliases for backward compat in seed.py etc.
-@property
-def engine():
-    return get_engine()
-
-
-@property
-def async_session():
-    return get_session_factory()
+# Module-level aliases for backward compat in seed.py etc.
+# These are callable — use get_engine() and get_session_factory() directly.
+engine = get_engine
+async_session = get_session_factory
 
 
 async def get_db() -> AsyncSession:

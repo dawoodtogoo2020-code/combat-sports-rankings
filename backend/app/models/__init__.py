@@ -6,6 +6,8 @@ from app.models.match import Match
 from app.models.rating import RatingHistory
 from app.models.social import Post, Comment, Like
 from app.models.sport import Sport, WeightClass, BeltRank
+from app.models.audit_log import AuditLog
+from app.models.data_source import DataSource
 
 __all__ = [
     "User",
@@ -22,4 +24,6 @@ __all__ = [
     "Sport",
     "WeightClass",
     "BeltRank",
+    "AuditLog",
+    "DataSource",
 ]
