@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.config import get_settings
@@ -13,7 +15,8 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup — ensure upload directory exists
+    Path("uploads/media").mkdir(parents=True, exist_ok=True)
     yield
     # Shutdown
 
@@ -57,3 +60,6 @@ async def health():
 
 # API routes
 app.include_router(api_router, prefix="/api/v1")
+
+# Serve uploaded media files
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

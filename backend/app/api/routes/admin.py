@@ -1,19 +1,21 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.athlete import Athlete
 from app.models.gym import Gym
-from app.models.event import Event
-from app.models.match import Match, VerificationStatus
+from app.models.event import Event, EventTier
+from app.models.match import Match, MatchOutcome, VerificationStatus
 from app.models.social import Post
 from app.models.rating import RatingHistory
 from app.models.audit_log import AuditLog, AuditAction
 from app.models.data_source import DataSource
 from app.middleware.auth import require_admin
 from app.elo.engine import EloEngine, PlayerInfo, MatchContext, CompetitionTier, MatchOutcome as EloMatchOutcome
+from app.ingestion.csv_ingester import CsvIngester
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -609,3 +611,258 @@ async def detect_duplicates(
         }
         for c in candidates
     ]
+
+
+# ─── CSV Import ───
+
+TIER_MAP = {
+    "local": EventTier.LOCAL,
+    "regional": EventTier.REGIONAL,
+    "national": EventTier.NATIONAL,
+    "international": EventTier.INTERNATIONAL,
+    "elite": EventTier.ELITE,
+}
+
+ELO_TIER_MAP = {
+    EventTier.LOCAL: CompetitionTier.LOCAL,
+    EventTier.REGIONAL: CompetitionTier.REGIONAL,
+    EventTier.NATIONAL: CompetitionTier.NATIONAL,
+    EventTier.INTERNATIONAL: CompetitionTier.INTERNATIONAL,
+    EventTier.ELITE: CompetitionTier.ELITE,
+}
+
+
+@router.post("/import-csv")
+async def import_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Import match data from a CSV file, create events/athletes as needed, and calculate ELO."""
+    if not file.filename or not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CSV files are accepted")
+
+    contents = await file.read()
+    csv_text = contents.decode("utf-8-sig")
+
+    ingester = CsvIngester()
+    try:
+        imported_events = ingester.parse_csv(csv_text)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"CSV parse error: {str(e)}")
+
+    if not imported_events:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No events found in CSV")
+
+    events_created = 0
+    matches_created = 0
+    athletes_created = 0
+
+    # Get default sport (BJJ)
+    from app.models.sport import Sport
+    sport_result = await db.execute(select(Sport).where(Sport.slug == "bjj"))
+    default_sport = sport_result.scalar_one_or_none()
+
+    for imp_event in imported_events:
+        # Find or create event
+        slug = imp_event.name.lower().replace(" ", "-").replace("/", "-")[:250]
+        event_result = await db.execute(select(Event).where(Event.slug == slug))
+        event = event_result.scalar_one_or_none()
+
+        if not event:
+            tier = TIER_MAP.get(imp_event.tier.lower(), EventTier.LOCAL)
+            event = Event(
+                name=imp_event.name,
+                slug=slug,
+                event_date=imp_event.event_date,
+                end_date=imp_event.end_date,
+                organizer=imp_event.organizer,
+                tier=tier,
+                city=imp_event.city,
+                country=imp_event.country,
+                is_gi=imp_event.is_gi,
+                is_nogi=imp_event.is_nogi,
+                source=imp_event.source,
+                source_id=imp_event.source_id,
+                source_url=imp_event.source_url,
+                is_published=True,
+                matches_imported=True,
+            )
+            db.add(event)
+            await db.flush()
+            events_created += 1
+
+        for imp_match in imp_event.matches:
+            # Find or create winner
+            winner = await _find_or_create_athlete(
+                db, imp_match.winner, default_sport.id if default_sport else None
+            )
+            if winner._created:
+                athletes_created += 1
+
+            # Find or create loser
+            loser = await _find_or_create_athlete(
+                db, imp_match.loser, default_sport.id if default_sport else None
+            )
+            if loser._created:
+                athletes_created += 1
+
+            # Calculate ELO
+            winner_info = PlayerInfo(
+                rating=winner.elo_rating,
+                total_matches=winner.total_matches,
+                years_experience=winner.years_training or 0,
+            )
+            loser_info = PlayerInfo(
+                rating=loser.elo_rating,
+                total_matches=loser.total_matches,
+                years_experience=loser.years_training or 0,
+            )
+
+            elo_tier = ELO_TIER_MAP.get(event.tier, CompetitionTier.LOCAL)
+            try:
+                outcome = EloMatchOutcome(imp_match.outcome)
+            except ValueError:
+                outcome = EloMatchOutcome.POINTS
+
+            ctx = MatchContext(
+                competition_tier=elo_tier,
+                outcome=outcome,
+                is_gi=imp_match.is_gi,
+                round_name=imp_match.round_name,
+            )
+
+            elo_result = elo_engine.calculate(winner_info, loser_info, ctx, is_draw=imp_match.is_draw)
+
+            # Create match record
+            try:
+                match_outcome = MatchOutcome(imp_match.outcome)
+            except ValueError:
+                match_outcome = MatchOutcome.POINTS
+
+            match = Match(
+                event_id=event.id,
+                winner_id=winner.id,
+                loser_id=loser.id,
+                outcome=match_outcome,
+                is_draw=imp_match.is_draw,
+                submission_type=imp_match.submission_type,
+                winner_score=imp_match.winner_score,
+                loser_score=imp_match.loser_score,
+                is_gi=imp_match.is_gi,
+                round_name=imp_match.round_name,
+                match_date=imp_match.match_date or datetime.combine(event.event_date, datetime.min.time()),
+                winner_elo_before=winner.elo_rating,
+                winner_elo_after=elo_result.winner_new_rating,
+                loser_elo_before=loser.elo_rating,
+                loser_elo_after=elo_result.loser_new_rating,
+                elo_change=elo_result.winner_change,
+                k_factor_used=elo_result.k_factor_used,
+                elo_calculated=True,
+                is_verified=False,
+                verification_status=VerificationStatus.PENDING,
+                source=imp_event.source or "csv",
+                source_id=imp_match.source_id,
+            )
+            db.add(match)
+            await db.flush()
+
+            # Update athlete ratings and stats
+            old_w = winner.elo_rating
+            old_l = loser.elo_rating
+            winner.elo_rating = elo_result.winner_new_rating
+            loser.elo_rating = elo_result.loser_new_rating
+
+            if imp_match.is_gi:
+                winner.gi_rating = winner.gi_rating + elo_result.winner_change
+                loser.gi_rating = loser.gi_rating + elo_result.loser_change
+            else:
+                winner.nogi_rating = winner.nogi_rating + elo_result.winner_change
+                loser.nogi_rating = loser.nogi_rating + elo_result.loser_change
+
+            winner.peak_rating = max(winner.peak_rating, winner.elo_rating)
+            loser.peak_rating = max(loser.peak_rating, loser.elo_rating)
+
+            winner.total_matches += 1
+            winner.wins += 1
+            loser.total_matches += 1
+            loser.losses += 1
+            if imp_match.outcome == "submission":
+                winner.submissions += 1
+
+            # Rating history
+            match_ts = imp_match.match_date or datetime.combine(event.event_date, datetime.min.time())
+            db.add(RatingHistory(
+                athlete_id=winner.id, match_id=match.id,
+                rating_before=old_w, rating_after=elo_result.winner_new_rating,
+                rating_change=elo_result.winner_change, rating_type="overall",
+                recorded_at=match_ts,
+            ))
+            db.add(RatingHistory(
+                athlete_id=loser.id, match_id=match.id,
+                rating_before=old_l, rating_after=elo_result.loser_new_rating,
+                rating_change=elo_result.loser_change, rating_type="overall",
+                recorded_at=match_ts,
+            ))
+            matches_created += 1
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.IMPORT_DATA,
+        target_type="system", target_id="csv_import",
+        details={
+            "filename": file.filename,
+            "events_imported": events_created,
+            "matches_imported": matches_created,
+            "athletes_created": athletes_created,
+        },
+        ip_address=_client_ip(request),
+    )
+
+    return {
+        "message": "CSV import complete",
+        "events_imported": events_created,
+        "matches_imported": matches_created,
+        "athletes_created": athletes_created,
+    }
+
+
+async def _find_or_create_athlete(db: AsyncSession, imp_athlete, sport_id=None):
+    """Find an existing athlete by name or create a new one."""
+    display_name = f"{imp_athlete.first_name} {imp_athlete.last_name}"
+
+    result = await db.execute(
+        select(Athlete).where(
+            Athlete.display_name == display_name,
+            Athlete.is_active == True,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing._created = False
+        return existing
+
+    athlete = Athlete(
+        first_name=imp_athlete.first_name,
+        last_name=imp_athlete.last_name,
+        display_name=display_name,
+        gender=imp_athlete.gender or "male",
+        country=imp_athlete.country,
+        sport_id=sport_id,
+        elo_rating=1200.0,
+        gi_rating=1200.0,
+        nogi_rating=1200.0,
+        peak_rating=1200.0,
+        total_matches=0,
+        wins=0,
+        losses=0,
+        draws=0,
+        submissions=0,
+        is_active=True,
+        is_verified=False,
+    )
+    db.add(athlete)
+    await db.flush()
+    athlete._created = True
+    return athlete

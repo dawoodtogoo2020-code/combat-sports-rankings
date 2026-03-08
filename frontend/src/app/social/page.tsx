@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useApi } from "@/hooks/useApi";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { social } from "@/lib/api";
+import { social, upload, mediaUrl } from "@/lib/api";
 import type { Post } from "@/types/index";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { EmptyState, SocialIcon } from "@/components/ui/EmptyState";
@@ -19,6 +19,17 @@ const ACCEPTED_IMAGE = "image/jpeg,image/png,image/webp,image/gif";
 const ACCEPTED_VIDEO = "video/mp4,video/quicktime";
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
+interface Comment {
+  id: string;
+  post_id: string;
+  author_id: string;
+  author_name: string | null;
+  author_avatar: string | null;
+  parent_id: string | null;
+  content: string;
+  created_at: string;
+}
+
 export default function SocialPage() {
   const { user, token } = useAuth();
   const [newPost, setNewPost] = useState("");
@@ -26,8 +37,16 @@ export default function SocialPage() {
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [posting, setPosting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Comments state
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [commentsByPost, setCommentsByPost] = useState<Record<string, Comment[]>>({});
+  const [loadingComments, setLoadingComments] = useState<Record<string, boolean>>({});
+  const [commentText, setCommentText] = useState<Record<string, string>>({});
+  const [postingComment, setPostingComment] = useState<Record<string, boolean>>({});
 
   const { data: posts, loading, refetch } = useApi<Post[]>(
     () => social.feed() as Promise<Post[]>,
@@ -56,7 +75,6 @@ export default function SocialPage() {
       }
     });
 
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -69,8 +87,23 @@ export default function SocialPage() {
     if (!newPost.trim() || !token) return;
     setPosting(true);
     setPostError(null);
+    setUploadProgress(null);
 
     try {
+      // Upload media files first
+      const uploadedUrls: string[] = [];
+      if (mediaFiles.length > 0) {
+        for (let i = 0; i < mediaFiles.length; i++) {
+          setUploadProgress(Math.round(((i) / mediaFiles.length) * 100));
+          const result = await upload.media(mediaFiles[i], token, (pct) => {
+            const overallPct = Math.round(((i + pct / 100) / mediaFiles.length) * 100);
+            setUploadProgress(overallPct);
+          });
+          uploadedUrls.push(result.url);
+        }
+        setUploadProgress(100);
+      }
+
       // Extract hashtags from content
       const hashtags = newPost.match(/#\w+/g) || [];
 
@@ -79,7 +112,7 @@ export default function SocialPage() {
           content: newPost,
           post_type: postType,
           hashtags,
-          media_urls: [], // Media upload would go through a separate upload endpoint
+          media_urls: uploadedUrls,
         },
         token
       );
@@ -87,11 +120,13 @@ export default function SocialPage() {
       setPostType("general");
       setMediaFiles([]);
       setMediaPreviews([]);
+      setUploadProgress(null);
       refetch();
     } catch (err) {
       setPostError(err instanceof Error ? err.message : "Failed to create post");
     } finally {
       setPosting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -101,7 +136,45 @@ export default function SocialPage() {
       await social.toggleLike(postId, token);
       refetch();
     } catch {
-      // Silently fail — user sees no change
+      // Silently fail
+    }
+  };
+
+  const toggleComments = async (postId: string) => {
+    const isExpanded = expandedComments[postId];
+    setExpandedComments((prev) => ({ ...prev, [postId]: !isExpanded }));
+
+    // Load comments if expanding and not already loaded
+    if (!isExpanded && !commentsByPost[postId]) {
+      setLoadingComments((prev) => ({ ...prev, [postId]: true }));
+      try {
+        const comments = await social.getComments(postId) as Comment[];
+        setCommentsByPost((prev) => ({ ...prev, [postId]: comments }));
+      } catch {
+        // Silently fail
+      } finally {
+        setLoadingComments((prev) => ({ ...prev, [postId]: false }));
+      }
+    }
+  };
+
+  const handleComment = async (postId: string) => {
+    const text = commentText[postId]?.trim();
+    if (!text || !token) return;
+
+    setPostingComment((prev) => ({ ...prev, [postId]: true }));
+    try {
+      const comment = await social.createComment(postId, { content: text }, token) as Comment;
+      setCommentsByPost((prev) => ({
+        ...prev,
+        [postId]: [...(prev[postId] || []), comment],
+      }));
+      setCommentText((prev) => ({ ...prev, [postId]: "" }));
+      refetch(); // Update comment count
+    } catch {
+      // Silently fail
+    } finally {
+      setPostingComment((prev) => ({ ...prev, [postId]: false }));
     }
   };
 
@@ -109,7 +182,7 @@ export default function SocialPage() {
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <h1 className="mb-6 text-3xl font-bold text-surface-900 dark:text-white">Social Feed</h1>
 
-      {/* Compose — only shown to authenticated users */}
+      {/* Compose */}
       {user ? (
         <div className="card mb-6">
           <textarea
@@ -147,6 +220,22 @@ export default function SocialPage() {
             </div>
           )}
 
+          {/* Upload progress bar */}
+          {uploadProgress !== null && (
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-xs text-surface-500 dark:text-surface-400 mb-1">
+                <span>Uploading media...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-100 dark:bg-surface-700">
+                <div
+                  className="h-full rounded-full bg-primary-500 transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {postError && (
             <div className="mt-2 text-sm text-clay-600 dark:text-clay-400">{postError}</div>
           )}
@@ -166,7 +255,6 @@ export default function SocialPage() {
                   {type}
                 </button>
               ))}
-              {/* Media upload button */}
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-full p-1.5 text-surface-400 transition-colors hover:bg-surface-100 hover:text-surface-600 dark:hover:bg-surface-700 dark:hover:text-surface-300"
@@ -190,7 +278,7 @@ export default function SocialPage() {
               disabled={!newPost.trim() || posting}
               className="btn-primary px-4 py-1.5 text-sm disabled:opacity-50"
             >
-              {posting ? "Posting..." : "Post"}
+              {posting ? (uploadProgress !== null ? "Uploading..." : "Posting...") : "Post"}
             </button>
           </div>
         </div>
@@ -243,10 +331,30 @@ export default function SocialPage() {
 
               {/* Media */}
               {post.media_urls && post.media_urls.length > 0 && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {post.media_urls.map((url, i) => (
-                    <img key={i} src={url} alt="" className="rounded-xl object-cover" />
-                  ))}
+                <div className={`mt-3 grid gap-2 ${post.media_urls.length === 1 ? "grid-cols-1" : "grid-cols-2"}`}>
+                  {post.media_urls.map((url, i) => {
+                    const resolved = mediaUrl(url);
+                    if (url.match(/\.(mp4|mov)$/i)) {
+                      return (
+                        <video
+                          key={i}
+                          src={resolved}
+                          controls
+                          className="w-full rounded-xl"
+                          preload="metadata"
+                        />
+                      );
+                    }
+                    return (
+                      <img
+                        key={i}
+                        src={resolved}
+                        alt=""
+                        className="rounded-xl object-cover w-full"
+                        loading="lazy"
+                      />
+                    );
+                  })}
                 </div>
               )}
 
@@ -276,13 +384,85 @@ export default function SocialPage() {
                   </svg>
                   {post.like_count}
                 </button>
-                <button className="flex items-center gap-1.5 text-sm text-surface-500 transition-colors hover:text-primary-600 dark:text-surface-400 dark:hover:text-primary-400">
+                <button
+                  onClick={() => toggleComments(post.id)}
+                  className={`flex items-center gap-1.5 text-sm transition-colors ${
+                    expandedComments[post.id]
+                      ? "text-primary-600 dark:text-primary-400"
+                      : "text-surface-500 hover:text-primary-600 dark:text-surface-400 dark:hover:text-primary-400"
+                  }`}
+                >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
                   {post.comment_count}
                 </button>
               </div>
+
+              {/* Comments section — expandable */}
+              {expandedComments[post.id] && (
+                <div className="mt-3 border-t border-surface-100 pt-3 dark:border-surface-700/30">
+                  {/* Loading */}
+                  {loadingComments[post.id] && (
+                    <div className="py-3 text-center text-xs text-surface-400">Loading comments...</div>
+                  )}
+
+                  {/* Comments list */}
+                  {commentsByPost[post.id] && commentsByPost[post.id].length > 0 && (
+                    <div className="space-y-3 mb-3">
+                      {commentsByPost[post.id].map((comment) => (
+                        <div key={comment.id} className="flex gap-2.5">
+                          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-surface-100 text-xs font-bold text-surface-500 dark:bg-surface-700 dark:text-surface-400">
+                            {comment.author_name?.[0]?.toUpperCase() || "?"}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-sm font-medium text-surface-900 dark:text-white">
+                                {comment.author_name || "Unknown"}
+                              </span>
+                              <span className="text-xs text-surface-400">
+                                {new Date(comment.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-sm text-surface-600 dark:text-surface-300">{comment.content}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Empty comments */}
+                  {commentsByPost[post.id] && commentsByPost[post.id].length === 0 && !loadingComments[post.id] && (
+                    <p className="py-2 text-center text-xs text-surface-400">No comments yet</p>
+                  )}
+
+                  {/* Comment input */}
+                  {user && (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={commentText[post.id] || ""}
+                        onChange={(e) => setCommentText((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleComment(post.id);
+                          }
+                        }}
+                        placeholder="Write a comment..."
+                        className="input flex-1 py-1.5 text-sm"
+                      />
+                      <button
+                        onClick={() => handleComment(post.id)}
+                        disabled={!commentText[post.id]?.trim() || postingComment[post.id]}
+                        className="btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                      >
+                        {postingComment[post.id] ? "..." : "Send"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
