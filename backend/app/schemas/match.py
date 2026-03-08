@@ -45,6 +45,7 @@ class MatchRead(BaseModel):
     winner_cp_earned: int
     loser_cp_earned: int
     is_verified: bool
+    verification_status: str = "pending"
     elo_calculated: bool
     created_at: datetime
 

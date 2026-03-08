@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useTheme } from "./ThemeProvider";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { LogoMark } from "@/components/ui/Logo";
 
 const navLinks = [
@@ -17,11 +18,14 @@ const navLinks = [
 
 export function Navbar() {
   const { theme, toggleTheme } = useTheme();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
     setMobileOpen(false);
+    setUserMenuOpen(false);
   }, [pathname]);
 
   const isActive = (href: string) => {
@@ -80,9 +84,53 @@ export function Navbar() {
             )}
           </button>
 
-          <Link href="/auth" className="btn-primary hidden text-sm sm:inline-flex">
-            Sign In
-          </Link>
+          {/* Auth state — desktop */}
+          {!authLoading && (
+            <>
+              {user ? (
+                <div className="relative hidden sm:block">
+                  <button
+                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium text-surface-700 transition-colors hover:bg-surface-100 dark:text-surface-300 dark:hover:bg-surface-800"
+                  >
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+                      {user.full_name?.[0]?.toUpperCase() || user.username?.[0]?.toUpperCase() || "U"}
+                    </div>
+                    <span className="max-w-[100px] truncate">{user.full_name || user.username}</span>
+                  </button>
+                  {userMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
+                      <div className="absolute right-0 z-50 mt-1 w-48 rounded-xl border border-surface-200/60 bg-white p-1 shadow-soft-lg dark:border-surface-700/40 dark:bg-surface-800">
+                        <div className="border-b border-surface-100 px-3 py-2 dark:border-surface-700/50">
+                          <div className="text-xs text-surface-400">{user.email}</div>
+                          <div className="mt-0.5 text-xs font-medium capitalize text-surface-500">{user.role}</div>
+                        </div>
+                        {user.role === "admin" && (
+                          <Link
+                            href="/admin"
+                            className="block rounded-lg px-3 py-2 text-sm text-surface-600 transition-colors hover:bg-surface-50 dark:text-surface-400 dark:hover:bg-surface-700"
+                          >
+                            Admin Panel
+                          </Link>
+                        )}
+                        <button
+                          onClick={() => { logout(); setUserMenuOpen(false); }}
+                          className="w-full rounded-lg px-3 py-2 text-left text-sm text-clay-600 transition-colors hover:bg-clay-50 dark:text-clay-400 dark:hover:bg-clay-900/20"
+                        >
+                          Sign Out
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <Link href="/auth" className="btn-primary hidden text-sm sm:inline-flex">
+                  Sign In
+                </Link>
+              )}
+            </>
+          )}
 
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
@@ -125,9 +173,34 @@ export function Navbar() {
             ))}
           </div>
           <div className="mt-3 border-t border-surface-100 pt-3 dark:border-surface-700/50">
-            <Link href="/auth" className="btn-primary w-full justify-center py-2.5 text-sm">
-              Sign In
-            </Link>
+            {user ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 px-4 py-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+                    {user.full_name?.[0]?.toUpperCase() || "U"}
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-surface-900 dark:text-white">{user.full_name || user.username}</div>
+                    <div className="text-xs text-surface-400">{user.email}</div>
+                  </div>
+                </div>
+                {user.role === "admin" && (
+                  <Link href="/admin" className="block rounded-xl px-4 py-2.5 text-sm font-medium text-surface-600 hover:bg-surface-50 dark:text-surface-400 dark:hover:bg-surface-800">
+                    Admin Panel
+                  </Link>
+                )}
+                <button
+                  onClick={() => { logout(); setMobileOpen(false); }}
+                  className="w-full rounded-xl px-4 py-2.5 text-left text-sm font-medium text-clay-600 hover:bg-clay-50 dark:text-clay-400 dark:hover:bg-clay-900/20"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <Link href="/auth" className="btn-primary w-full justify-center py-2.5 text-sm">
+                Sign In
+              </Link>
+            )}
           </div>
         </nav>
       </div>

@@ -1,19 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
-
-const demoEvents = [
-  { id: "1", name: "ADCC World Championships 2025", date: "2025-09-20", city: "Las Vegas", country: "US", tier: "elite", organizer: "ADCC", isGi: false, isNogi: true, matchCount: 248 },
-  { id: "2", name: "IBJJF World Championship 2025", date: "2025-06-01", city: "Anaheim", country: "US", tier: "elite", organizer: "IBJJF", isGi: true, isNogi: false, matchCount: 1200 },
-  { id: "3", name: "AJP Abu Dhabi Grand Slam", date: "2025-04-15", city: "Abu Dhabi", country: "AE", tier: "international", organizer: "AJP", isGi: true, isNogi: true, matchCount: 680 },
-  { id: "4", name: "Grappling Industries NYC", date: "2025-03-10", city: "New York", country: "US", tier: "regional", organizer: "Grappling Industries", isGi: true, isNogi: true, matchCount: 320 },
-  { id: "5", name: "NAGA Chicago Open", date: "2025-02-22", city: "Chicago", country: "US", tier: "regional", organizer: "NAGA", isGi: true, isNogi: true, matchCount: 180 },
-  { id: "6", name: "Polaris Invitational 25", date: "2025-05-18", city: "London", country: "GB", tier: "international", organizer: "Polaris", isGi: false, isNogi: true, matchCount: 16 },
-];
+import { useApi } from "@/hooks/useApi";
+import { events as eventsApi } from "@/lib/api";
+import type { Event } from "@/types/index";
+import { SkeletonCard } from "@/components/ui/Skeleton";
+import { EmptyState, EventsIcon } from "@/components/ui/EmptyState";
 
 const tierStyles: Record<string, string> = {
-  elite: "bg-gold-100 text-gold-700 dark:bg-gold-900/30 dark:text-gold-400",
+  elite: "badge-gold",
   international: "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400",
   national: "bg-accent-100 text-accent-700 dark:bg-accent-900/30 dark:text-accent-400",
   regional: "bg-surface-200 text-surface-600 dark:bg-surface-700 dark:text-surface-300",
@@ -22,13 +18,25 @@ const tierStyles: Record<string, string> = {
 
 export default function EventsPage() {
   const [search, setSearch] = useState("");
+  const { data, loading } = useApi<Event[]>(
+    () => eventsApi.list() as Promise<Event[]>,
+    []
+  );
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    if (!search) return data;
+    return data.filter((e) =>
+      e.name.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [data, search]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-surface-900 dark:text-white">Events</h1>
-          <p className="mt-1 text-surface-500 dark:text-surface-400">Competitions tracked for ELO rankings</p>
+          <p className="mt-1 text-surface-500 dark:text-surface-400">Competitions and tournaments</p>
         </div>
         <input
           type="text"
@@ -39,47 +47,55 @@ export default function EventsPage() {
         />
       </div>
 
-      <div className="space-y-3">
-        {demoEvents
-          .filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
-          .map((event) => (
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<EventsIcon />}
+          title={search ? "No events found" : "No events yet"}
+          description={
+            search
+              ? "Try adjusting your search."
+              : "Events will appear here once competition data is imported."
+          }
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((event) => (
             <Link
               key={event.id}
               href={`/events/${event.id}`}
-              className="card-hover group block"
+              className="card-hover group"
             >
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-lg font-semibold text-surface-900 transition-colors group-hover:text-primary-600 dark:text-white dark:group-hover:text-primary-400">
-                      {event.name}
-                    </h3>
-                    <span className={`badge ${tierStyles[event.tier]}`}>
-                      {event.tier.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-3 text-sm text-surface-500 dark:text-surface-400">
-                    <span>{new Date(event.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
-                    <span className="text-surface-300 dark:text-surface-600">&middot;</span>
-                    <span>{event.city}, {event.country}</span>
-                    <span className="text-surface-300 dark:text-surface-600">&middot;</span>
-                    <span>{event.organizer}</span>
-                  </div>
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <h3 className="truncate font-semibold text-surface-900 transition-colors group-hover:text-primary-600 dark:text-white dark:group-hover:text-primary-400">
+                    {event.name}
+                  </h3>
+                  <p className="mt-1 text-sm text-surface-500 dark:text-surface-400">
+                    {event.city ? `${event.city}, ` : ""}{event.country || "TBD"}
+                  </p>
                 </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="flex gap-1.5">
-                    {event.isGi && <span className="badge bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300">Gi</span>}
-                    {event.isNogi && <span className="badge bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300">No-Gi</span>}
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-surface-900 dark:text-white">{event.matchCount}</div>
-                    <div className="text-xs text-surface-500">matches</div>
-                  </div>
-                </div>
+                <span className={`badge ml-2 flex-shrink-0 ${tierStyles[event.tier] || tierStyles.local}`}>
+                  {event.tier}
+                </span>
+              </div>
+              <div className="mt-3 text-xs text-surface-400 dark:text-surface-500">
+                {new Date(event.event_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                {event.organizer && ` \u00b7 ${event.organizer}`}
+              </div>
+              <div className="mt-3 flex gap-1.5">
+                {event.is_gi && <span className="badge bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300">Gi</span>}
+                {event.is_nogi && <span className="badge bg-surface-100 text-surface-600 dark:bg-surface-700 dark:text-surface-300">No-Gi</span>}
               </div>
             </Link>
           ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

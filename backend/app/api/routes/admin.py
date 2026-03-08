@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -7,9 +7,11 @@ from app.models.user import User, UserRole
 from app.models.athlete import Athlete
 from app.models.gym import Gym
 from app.models.event import Event
-from app.models.match import Match
+from app.models.match import Match, VerificationStatus
 from app.models.social import Post
 from app.models.rating import RatingHistory
+from app.models.audit_log import AuditLog, AuditAction
+from app.models.data_source import DataSource
 from app.middleware.auth import require_admin
 from app.elo.engine import EloEngine, PlayerInfo, MatchContext, CompetitionTier, MatchOutcome as EloMatchOutcome
 from pydantic import BaseModel, Field
@@ -38,6 +40,38 @@ class MergeAthletes(BaseModel):
     duplicate_id: uuid.UUID
 
 
+# ─── Helpers ───
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _log_action(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    action: AuditAction,
+    target_type: str,
+    target_id: str,
+    details: dict | None = None,
+    ip_address: str | None = None,
+):
+    entry = AuditLog(
+        user_id=user_id,
+        action=action.value,
+        target_type=target_type,
+        target_id=target_id,
+        details=details,
+        ip_address=ip_address,
+    )
+    db.add(entry)
+
+
+# ─── Dashboard ───
+
 @router.get("/dashboard", response_model=DashboardStats)
 async def admin_dashboard(
     db: AsyncSession = Depends(get_db),
@@ -60,10 +94,13 @@ async def admin_dashboard(
     )
 
 
+# ─── Athletes ───
+
 @router.post("/athletes/{athlete_id}/adjust-elo")
 async def adjust_elo(
     athlete_id: uuid.UUID,
     data: EloAdjustment,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -78,7 +115,6 @@ async def adjust_elo(
     athlete.nogi_rating = data.new_rating
     athlete.peak_rating = max(athlete.peak_rating, data.new_rating)
 
-    # Record adjustment in history
     history = RatingHistory(
         athlete_id=athlete.id,
         rating_before=old_rating,
@@ -88,12 +124,20 @@ async def adjust_elo(
     )
     db.add(history)
 
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.ELO_ADJUST,
+        target_type="athlete", target_id=str(athlete_id),
+        details={"old_rating": old_rating, "new_rating": data.new_rating, "reason": data.reason},
+        ip_address=_client_ip(request),
+    )
+
     return {"message": f"Rating adjusted from {old_rating} to {data.new_rating}", "reason": data.reason}
 
 
 @router.delete("/athletes/{athlete_id}")
 async def delete_athlete(
     athlete_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -103,12 +147,21 @@ async def delete_athlete(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
 
     athlete.is_active = False
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.ATHLETE_DELETE,
+        target_type="athlete", target_id=str(athlete_id),
+        details={"display_name": athlete.display_name},
+        ip_address=_client_ip(request),
+    )
+
     return {"message": "Athlete deactivated"}
 
 
 @router.post("/athletes/merge")
 async def merge_athletes(
     data: MergeAthletes,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -122,58 +175,112 @@ async def merge_athletes(
     if not dup_athlete:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Duplicate athlete not found")
 
-    # Move matches from duplicate to primary
     await db.execute(
         update(Match).where(Match.winner_id == data.duplicate_id).values(winner_id=data.primary_id)
     )
     await db.execute(
         update(Match).where(Match.loser_id == data.duplicate_id).values(loser_id=data.primary_id)
     )
-
-    # Move rating history
     await db.execute(
         update(RatingHistory).where(RatingHistory.athlete_id == data.duplicate_id).values(athlete_id=data.primary_id)
     )
 
-    # Merge stats
     primary_athlete.total_matches += dup_athlete.total_matches
     primary_athlete.wins += dup_athlete.wins
     primary_athlete.losses += dup_athlete.losses
     primary_athlete.draws += dup_athlete.draws
     primary_athlete.submissions += dup_athlete.submissions
 
-    # Deactivate duplicate
     dup_athlete.is_active = False
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.ATHLETE_MERGE,
+        target_type="athlete", target_id=str(data.primary_id),
+        details={"merged_from": str(data.duplicate_id), "merged_name": dup_athlete.display_name},
+        ip_address=_client_ip(request),
+    )
 
     return {"message": f"Merged {dup_athlete.display_name} into {primary_athlete.display_name}"}
 
 
-@router.post("/recalculate-rankings")
-async def recalculate_rankings(
+# ─── Match Verification ───
+
+@router.patch("/matches/{match_id}/verify")
+async def verify_match(
+    match_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
-    """Recalculate all ELO ratings from scratch based on match history."""
-    # Reset all athletes to base rating
+    result = await db.execute(select(Match).where(Match.id == match_id))
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    match.verification_status = VerificationStatus.SOURCE_VERIFIED
+    match.is_verified = True
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.MATCH_VERIFY,
+        target_type="match", target_id=str(match_id),
+        details={"new_status": "source_verified"},
+        ip_address=_client_ip(request),
+    )
+
+    return {"message": "Match verified"}
+
+
+@router.patch("/matches/{match_id}/reject")
+async def reject_match(
+    match_id: uuid.UUID,
+    reason: str = Query(default="", max_length=500),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = await db.execute(select(Match).where(Match.id == match_id))
+    match = result.scalar_one_or_none()
+    if not match:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Match not found")
+
+    match.verification_status = VerificationStatus.REJECTED
+    match.is_verified = False
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.MATCH_REJECT,
+        target_type="match", target_id=str(match_id),
+        details={"reason": reason},
+        ip_address=_client_ip(request) if request else "unknown",
+    )
+
+    return {"message": "Match rejected"}
+
+
+# ─── Recalculate Rankings ───
+
+@router.post("/recalculate-rankings")
+async def recalculate_rankings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Recalculate all ELO ratings from scratch based on verified match history."""
     await db.execute(
         update(Athlete).values(
-            elo_rating=1200.0,
-            gi_rating=1200.0,
-            nogi_rating=1200.0,
-            peak_rating=1200.0,
-            wins=0,
-            losses=0,
-            draws=0,
-            submissions=0,
-            total_matches=0,
+            elo_rating=1200.0, gi_rating=1200.0, nogi_rating=1200.0,
+            peak_rating=1200.0, wins=0, losses=0, draws=0, submissions=0, total_matches=0,
         )
     )
 
-    # Clear rating history
-    await db.execute(select(func.count()).select_from(RatingHistory))
-
-    # Get all matches in chronological order
-    result = await db.execute(select(Match).order_by(Match.created_at.asc()))
+    # Only use verified matches for ranking calculation
+    result = await db.execute(
+        select(Match)
+        .where(Match.verification_status.in_([
+            VerificationStatus.SOURCE_VERIFIED,
+            VerificationStatus.CROSS_CHECKED,
+        ]))
+        .order_by(Match.created_at.asc())
+    )
     matches = result.scalars().all()
 
     processed = 0
@@ -207,15 +314,12 @@ async def recalculate_rankings(
             outcome = EloMatchOutcome.POINTS
 
         ctx = MatchContext(
-            competition_tier=tier,
-            outcome=outcome,
-            is_gi=match.is_gi,
-            round_name=match.round_name,
+            competition_tier=tier, outcome=outcome,
+            is_gi=match.is_gi, round_name=match.round_name,
         )
 
         elo_result = elo_engine.calculate(winner_info, loser_info, ctx, is_draw=match.is_draw)
 
-        # Update ratings
         if match.is_gi:
             winner.gi_rating = elo_result.winner_new_rating
             loser.gi_rating = elo_result.loser_new_rating
@@ -228,7 +332,6 @@ async def recalculate_rankings(
         winner.peak_rating = max(winner.peak_rating, winner.elo_rating)
         loser.peak_rating = max(loser.peak_rating, loser.elo_rating)
 
-        # Update stats
         if match.is_draw:
             winner.draws += 1
             loser.draws += 1
@@ -241,7 +344,6 @@ async def recalculate_rankings(
         if match.outcome and match.outcome.value == "submission":
             winner.submissions += 1
 
-        # Update match record
         match.winner_elo_before = winner_info.rating
         match.winner_elo_after = elo_result.winner_new_rating
         match.loser_elo_before = loser_info.rating
@@ -252,8 +354,17 @@ async def recalculate_rankings(
 
         processed += 1
 
-    return {"message": f"Recalculated {processed} matches"}
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.RECALCULATE,
+        target_type="system", target_id="rankings",
+        details={"matches_processed": processed},
+        ip_address=_client_ip(request),
+    )
 
+    return {"message": f"Recalculated {processed} verified matches"}
+
+
+# ─── Users ───
 
 @router.get("/users")
 async def list_users(
@@ -283,6 +394,7 @@ async def list_users(
 async def update_user_role(
     user_id: uuid.UUID,
     role: str = Query(pattern=r"^(user|athlete|gym_owner|admin)$"),
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -291,13 +403,25 @@ async def update_user_role(
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    old_role = target.role.value
     target.role = UserRole(role)
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.ROLE_CHANGE,
+        target_type="user", target_id=str(user_id),
+        details={"old_role": old_role, "new_role": role},
+        ip_address=_client_ip(request) if request else "unknown",
+    )
+
     return {"message": f"Role updated to {role}"}
 
+
+# ─── Gyms ───
 
 @router.post("/gyms/{gym_id}/verify")
 async def verify_gym(
     gym_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -307,12 +431,23 @@ async def verify_gym(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gym not found")
 
     gym.is_verified = True
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.GYM_VERIFY,
+        target_type="gym", target_id=str(gym_id),
+        details={"gym_name": gym.name},
+        ip_address=_client_ip(request),
+    )
+
     return {"message": f"Gym '{gym.name}' verified"}
 
+
+# ─── Posts ───
 
 @router.delete("/posts/{post_id}")
 async def moderate_post(
     post_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
@@ -322,4 +457,155 @@ async def moderate_post(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     post.is_published = False
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.POST_MODERATE,
+        target_type="post", target_id=str(post_id),
+        ip_address=_client_ip(request),
+    )
+
     return {"message": "Post hidden"}
+
+
+# ─── Audit Log ───
+
+@router.get("/audit-log")
+async def list_audit_logs(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    action: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+):
+    query = select(AuditLog).order_by(AuditLog.created_at.desc())
+
+    if action:
+        query = query.where(AuditLog.action == action)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    count_result = await db.execute(count_query)
+    total = count_result.scalar()
+
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return {
+        "entries": [
+            {
+                "id": str(log.id),
+                "user_id": str(log.user_id),
+                "user_name": log.user.full_name or log.user.username if log.user else "Unknown",
+                "action": log.action,
+                "target_type": log.target_type,
+                "target_id": log.target_id,
+                "details": log.details,
+                "ip_address": log.ip_address,
+                "created_at": log.created_at.isoformat(),
+            }
+            for log in logs
+        ],
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+# ─── Data Sources ───
+
+@router.get("/data-sources")
+async def list_data_sources(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = await db.execute(select(DataSource).order_by(DataSource.name))
+    sources = result.scalars().all()
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "slug": s.slug,
+            "base_url": s.base_url,
+            "description": s.description,
+            "ingestion_method": s.ingestion_method,
+            "robots_txt_status": s.robots_txt_status,
+            "tos_reviewed": s.tos_reviewed,
+            "tos_allows_scraping": s.tos_allows_scraping,
+            "compliance_notes": s.compliance_notes,
+            "is_active": s.is_active,
+            "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in sources
+    ]
+
+
+@router.patch("/data-sources/{source_id}")
+async def update_data_source(
+    source_id: uuid.UUID,
+    is_active: bool | None = Query(None),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    result = await db.execute(select(DataSource).where(DataSource.id == source_id))
+    source = result.scalar_one_or_none()
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data source not found")
+
+    if is_active is not None:
+        source.is_active = is_active
+
+    return {"message": f"Data source '{source.name}' updated"}
+
+
+# ─── Duplicate Detection ───
+
+@router.get("/athletes/duplicates")
+async def detect_duplicates(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    min_confidence: float = Query(0.6, ge=0.0, le=1.0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Find potential duplicate athletes using fuzzy name matching."""
+    from app.services.duplicate_detection import score_duplicate_pair
+
+    result = await db.execute(
+        select(Athlete).where(Athlete.is_active == True).order_by(Athlete.display_name)
+    )
+    athletes = result.scalars().all()
+
+    candidates = []
+    athlete_dicts = [
+        {
+            "id": a.id,
+            "display_name": a.display_name,
+            "gym_id": a.gym_id,
+            "country_code": a.country_code,
+            "belt_rank_id": a.belt_rank_id,
+            "weight_class_id": a.weight_class_id,
+        }
+        for a in athletes
+    ]
+
+    for i in range(len(athlete_dicts)):
+        for j in range(i + 1, len(athlete_dicts)):
+            pair = score_duplicate_pair(athlete_dicts[i], athlete_dicts[j])
+            if pair.confidence >= min_confidence:
+                candidates.append(pair)
+
+    candidates.sort(key=lambda c: c.confidence, reverse=True)
+    candidates = candidates[:limit]
+
+    return [
+        {
+            "athlete_a_id": c.athlete_a_id,
+            "athlete_a_name": c.athlete_a_name,
+            "athlete_b_id": c.athlete_b_id,
+            "athlete_b_name": c.athlete_b_name,
+            "confidence": round(c.confidence, 3),
+            "reasons": c.reasons,
+        }
+        for c in candidates
+    ]

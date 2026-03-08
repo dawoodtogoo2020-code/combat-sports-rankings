@@ -6,6 +6,7 @@ from sqlalchemy.orm import joinedload
 from app.database import get_db
 from app.models.athlete import Athlete
 from app.models.gym import Gym
+from app.models.match import Match, VerificationStatus
 from app.schemas.leaderboard import LeaderboardEntry, LeaderboardResponse
 from app.middleware.rate_limit import limiter
 

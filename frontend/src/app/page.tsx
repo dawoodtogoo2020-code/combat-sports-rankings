@@ -1,11 +1,6 @@
-import Link from "next/link";
+"use client";
 
-const stats = [
-  { label: "Athletes Ranked", value: "12,000+" },
-  { label: "Matches Tracked", value: "85,000+" },
-  { label: "Events Indexed", value: "2,400+" },
-  { label: "Countries", value: "90+" },
-];
+import Link from "next/link";
 
 const features = [
   {
@@ -27,17 +22,17 @@ const features = [
     ),
   },
   {
-    title: "Live Results",
+    title: "Verified Results",
     description: "Competition data imported from AJP, ADCC, NAGA, Grappling Industries, and more.",
     icon: (
       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
       </svg>
     ),
   },
   {
     title: "Gym Leaderboards",
-    description: "Gyms can track their members' rankings and run internal competitions.",
+    description: "Gyms can track their members' rankings and compare with other academies.",
     icon: (
       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -46,12 +41,18 @@ const features = [
   },
 ];
 
+const statLabels = [
+  { label: "Athletes Ranked", icon: "M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" },
+  { label: "Matches Tracked", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+  { label: "Events Indexed", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
+  { label: "Countries Covered", icon: "M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064" },
+];
+
 export default function HomePage() {
   return (
     <div>
       {/* Hero */}
       <section className="relative overflow-hidden bg-surface-900 py-28 text-white dark:bg-surface-950">
-        {/* Atmospheric background layers */}
         <div className="absolute inset-0 bg-gradient-to-b from-primary-950/40 via-surface-900 to-surface-950" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-primary-800/20 via-transparent to-transparent" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_left,_var(--tw-gradient-stops))] from-accent-900/10 via-transparent to-transparent" />
@@ -83,16 +84,18 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Stats */}
+      {/* Stats — descriptive labels, no fake numbers */}
       <section className="border-b border-surface-200/50 bg-white py-14 dark:border-surface-700/30 dark:bg-surface-900">
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-            {stats.map((stat) => (
-              <div key={stat.label} className="text-center">
-                <div className="text-3xl font-bold text-primary-600 dark:text-primary-400">
-                  {stat.value}
+            {statLabels.map((stat) => (
+              <div key={stat.label} className="flex flex-col items-center text-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 dark:bg-primary-950/40">
+                  <svg className="h-6 w-6 text-primary-600 dark:text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={stat.icon} />
+                  </svg>
                 </div>
-                <div className="mt-1.5 text-sm text-surface-500 dark:text-surface-400">
+                <div className="mt-3 text-sm font-medium text-surface-700 dark:text-surface-300">
                   {stat.label}
                 </div>
               </div>

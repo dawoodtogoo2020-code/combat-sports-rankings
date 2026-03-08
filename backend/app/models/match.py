@@ -19,6 +19,13 @@ class MatchOutcome(str, enum.Enum):
     OTHER = "other"
 
 
+class VerificationStatus(str, enum.Enum):
+    PENDING = "pending"
+    SOURCE_VERIFIED = "source_verified"
+    CROSS_CHECKED = "cross_checked"
+    REJECTED = "rejected"
+
+
 class Match(Base):
     __tablename__ = "matches"
 
@@ -63,6 +70,9 @@ class Match(Base):
 
     # Status
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verification_status: Mapped[VerificationStatus] = mapped_column(
+        SAEnum(VerificationStatus), default=VerificationStatus.PENDING
+    )
     elo_calculated: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

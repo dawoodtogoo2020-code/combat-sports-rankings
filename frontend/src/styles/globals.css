@@ -129,6 +129,26 @@
   display: none;
 }
 
+/* Mobile touch targets — minimum 44px for all interactive elements */
+@media (max-width: 640px) {
+  button, a, select, [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Compact badges/pills can be shorter in width but need height */
+  .badge, [class*="rounded-full"][class*="px-3"] {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Ensure no horizontal overflow */
+  body {
+    overflow-x: hidden;
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
