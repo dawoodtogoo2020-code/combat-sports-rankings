@@ -53,33 +53,51 @@ def _run_migrations():
 
 async def _auto_seed():
     """Create tables and seed if database is empty (first deploy)."""
+    import traceback
     try:
         from app.database import get_engine, get_session_factory, Base
-        from sqlalchemy import select, text
+        from sqlalchemy import text
+
+        # Import ALL models so Base.metadata knows about them
+        import app.models  # noqa — triggers model registration
 
         engine = get_engine()
 
         # Create all tables from ORM models
+        logger.info("Creating database tables...")
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables ensured")
+        logger.info("Database tables created/verified")
 
-        # Check if already seeded
+        # Check if already seeded by checking for any sport records
         session_factory = get_session_factory()
         async with session_factory() as db:
-            result = await db.execute(text("SELECT COUNT(*) FROM sports"))
-            count = result.scalar()
-            if count and count > 0:
-                logger.info("Database already seeded, skipping")
-                return
+            try:
+                result = await db.execute(text("SELECT COUNT(*) FROM sports"))
+                count = result.scalar()
+                if count and count > 0:
+                    logger.info(f"Database already seeded ({count} sports found), skipping")
+                    return
+            except Exception:
+                logger.info("Sports table empty or not queryable, will seed")
 
-        # Run seed
+        # Run seed — import from the root-level seed.py
         logger.info("Empty database detected — running seed...")
-        from seed import seed
-        await seed()
-        logger.info("Database seeded successfully")
+        import importlib
+        import sys
+        seed_path = Path("/app/seed.py")
+        if not seed_path.exists():
+            seed_path = Path("seed.py")
+        if seed_path.exists():
+            spec = importlib.util.spec_from_file_location("seed_module", str(seed_path))
+            seed_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(seed_mod)
+            await seed_mod.seed()
+            logger.info("Database seeded successfully!")
+        else:
+            logger.warning(f"seed.py not found at /app/seed.py or ./seed.py")
     except Exception as e:
-        logger.warning(f"Auto-seed failed (non-fatal): {e}")
+        logger.error(f"Auto-seed failed: {e}\n{traceback.format_exc()}")
 
 
 @asynccontextmanager
