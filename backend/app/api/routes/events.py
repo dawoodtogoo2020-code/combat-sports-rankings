@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.event import Event
 from app.models.match import Match
+from app.models.athlete import Athlete
 from app.schemas.event import EventCreate, EventRead, EventUpdate
 from app.schemas.match import MatchRead
 from app.middleware.auth import get_current_user, require_admin
@@ -102,7 +103,7 @@ async def update_event(
     return event
 
 
-@router.get("/{event_id}/matches", response_model=list[MatchRead])
+@router.get("/{event_id}/matches")
 @limiter.limit("30/minute")
 async def get_event_matches(
     request,
@@ -111,12 +112,28 @@ async def get_event_matches(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
 ):
+    from sqlalchemy.orm import aliased
+
+    Winner = aliased(Athlete)
+    Loser = aliased(Athlete)
+
     query = (
-        select(Match)
+        select(Match, Winner.display_name.label("winner_name"), Loser.display_name.label("loser_name"))
+        .join(Winner, Match.winner_id == Winner.id)
+        .join(Loser, Match.loser_id == Loser.id)
         .where(Match.event_id == event_id)
         .order_by(Match.created_at.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     result = await db.execute(query)
-    return result.scalars().all()
+    rows = result.all()
+
+    matches = []
+    for match, winner_name, loser_name in rows:
+        match_dict = MatchRead.model_validate(match).model_dump()
+        match_dict["winner_name"] = winner_name
+        match_dict["loser_name"] = loser_name
+        matches.append(match_dict)
+
+    return matches

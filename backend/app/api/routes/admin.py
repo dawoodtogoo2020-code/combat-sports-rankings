@@ -16,6 +16,8 @@ from app.models.data_source import DataSource
 from app.middleware.auth import require_admin
 from app.elo.engine import EloEngine, PlayerInfo, MatchContext, CompetitionTier, MatchOutcome as EloMatchOutcome
 from app.ingestion.csv_ingester import CsvIngester
+from app.ingestion.orchestrator import ScrapeOrchestrator, INGESTER_MAP
+from app.models.scrape_log import ScrapeLog
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -866,3 +868,109 @@ async def _find_or_create_athlete(db: AsyncSession, imp_athlete, sport_id=None):
     await db.flush()
     athlete._created = True
     return athlete
+
+
+# ─── Scrape Endpoints ───
+
+@router.post("/scrape/all")
+async def scrape_all_sources(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Trigger scraping from all active data sources."""
+    orchestrator = ScrapeOrchestrator(db)
+    summary = await orchestrator.run_all()
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.IMPORT_DATA,
+        target_type="system", target_id="scrape_all",
+        details=summary,
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+
+    return summary
+
+
+@router.post("/scrape/{source_slug}")
+async def scrape_single_source(
+    source_slug: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Trigger scraping from a single data source."""
+    if source_slug not in INGESTER_MAP:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown source: {source_slug}. Available: {list(INGESTER_MAP.keys())}",
+        )
+
+    orchestrator = ScrapeOrchestrator(db)
+    result = await orchestrator.run_source(source_slug)
+
+    await _log_action(
+        db, user_id=user.id, action=AuditAction.IMPORT_DATA,
+        target_type="data_source", target_id=source_slug,
+        details=result,
+        ip_address=_client_ip(request),
+    )
+    await db.commit()
+
+    return result
+
+
+@router.get("/scrape/logs")
+async def list_scrape_logs(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    source_slug: str | None = Query(None),
+):
+    """List scrape run history."""
+    query = select(ScrapeLog).order_by(ScrapeLog.started_at.desc())
+
+    if source_slug:
+        # Join with data source to filter by slug
+        query = (
+            query.join(DataSource, ScrapeLog.data_source_id == DataSource.id)
+            .where(DataSource.slug == source_slug)
+        )
+
+    count_q = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_q)).scalar()
+
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return {
+        "entries": [
+            {
+                "id": str(log.id),
+                "data_source_id": str(log.data_source_id) if log.data_source_id else None,
+                "started_at": log.started_at.isoformat() if log.started_at else None,
+                "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+                "status": log.status,
+                "events_found": log.events_found,
+                "matches_imported": log.matches_imported,
+                "athletes_created": log.athletes_created,
+                "errors": log.errors,
+                "notes": log.notes,
+            }
+            for log in logs
+        ],
+        "total_count": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/scrape/sources")
+async def list_available_scrapers(
+    user: User = Depends(require_admin),
+):
+    """List all available scraper sources."""
+    return {"sources": list(INGESTER_MAP.keys())}

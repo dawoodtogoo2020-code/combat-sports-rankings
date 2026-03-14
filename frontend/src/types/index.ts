@@ -140,6 +140,8 @@ export interface Match {
   event_id: string;
   winner_id: string;
   loser_id: string;
+  winner_name: string | null;
+  loser_name: string | null;
   outcome: string;
   is_draw: boolean;
   submission_type: string | null;

@@ -99,17 +99,24 @@ export default function EventDetailClient() {
               <div key={m.id} className="flex items-center justify-between rounded-xl border border-surface-100 p-3.5 dark:border-surface-700/50">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="font-semibold text-moss-600 dark:text-moss-400">Winner</span>
-                    <span className="text-surface-400">vs</span>
-                    <span className="text-surface-500 dark:text-surface-400">Opponent</span>
+                    <Link href={`/athletes/${m.winner_id}`} className="font-semibold text-moss-600 hover:underline dark:text-moss-400">
+                      {m.winner_name || "Winner"}
+                    </Link>
+                    <span className="text-surface-400">def.</span>
+                    <Link href={`/athletes/${m.loser_id}`} className="text-surface-600 hover:underline dark:text-surface-300">
+                      {m.loser_name || "Opponent"}
+                    </Link>
                   </div>
-                  <div className="mt-1 text-xs text-surface-400">
-                    {m.outcome}{m.submission_type && ` (${m.submission_type})`}
+                  <div className="mt-1 flex items-center gap-2 text-xs text-surface-400">
+                    <span className="capitalize">{m.outcome}</span>
+                    {m.submission_type && <span>({m.submission_type})</span>}
+                    {m.round_name && <span className="text-surface-300 dark:text-surface-500">&middot; {m.round_name}</span>}
+                    {m.is_gi ? <span className="text-surface-300 dark:text-surface-500">&middot; Gi</span> : <span className="text-surface-300 dark:text-surface-500">&middot; No-Gi</span>}
                   </div>
                 </div>
                 {m.elo_change != null && (
                   <span className={`font-mono text-sm font-medium ${m.elo_change > 0 ? "rating-up" : "rating-down"}`}>
-                    {m.elo_change > 0 ? "+" : ""}{m.elo_change}
+                    {m.elo_change > 0 ? "+" : ""}{Math.round(m.elo_change)}
                   </span>
                 )}
               </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { useApi } from "@/hooks/useApi";
 import { athletes as athletesApi } from "@/lib/api";
 import type { Athlete, RatingPoint } from "@/types/index";
@@ -95,6 +96,12 @@ export default function AthleteDetailClient() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      <div className="mb-6">
+        <Link href="/athletes" className="text-sm text-surface-500 hover:text-primary-600 dark:text-surface-400 dark:hover:text-primary-400 transition-colors">
+          &larr; Back to Athletes
+        </Link>
+      </div>
+
       {/* Profile Header */}
       <div className="card mb-6">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start">

@@ -8,6 +8,7 @@ from app.models.social import Post, Comment, Like
 from app.models.sport import Sport, WeightClass, BeltRank
 from app.models.audit_log import AuditLog
 from app.models.data_source import DataSource
+from app.models.scrape_log import ScrapeLog
 
 __all__ = [
     "User",
@@ -26,4 +27,5 @@ __all__ = [
     "BeltRank",
     "AuditLog",
     "DataSource",
+    "ScrapeLog",
 ]

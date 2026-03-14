@@ -26,6 +26,8 @@ class MatchRead(BaseModel):
     division_id: uuid.UUID | None = None
     winner_id: uuid.UUID
     loser_id: uuid.UUID
+    winner_name: str | None = None
+    loser_name: str | None = None
     outcome: str
     is_draw: bool
     submission_type: str | None = None

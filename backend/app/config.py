@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_debug: bool = False
     frontend_url: str = "http://localhost:3000"
     backend_url: str = "http://localhost:8000"
+    port: int = 8000
 
     # Database
     database_url: str = "postgresql+asyncpg://csrankings:csrankings@localhost:5432/csrankings"
@@ -26,9 +27,6 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_per_minute: int = 60
     rate_limit_per_hour: int = 1000
-
-    # Elasticsearch
-    elasticsearch_url: str = "http://localhost:9200"
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]
