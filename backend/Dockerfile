@@ -19,9 +19,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY backend/ .
 
-# Fix Windows line endings in shell scripts
-RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
-
 # Create non-root user
 RUN adduser --disabled-password --gecos "" appuser && \
     mkdir -p uploads/media && chown -R appuser:appuser /app
@@ -29,4 +26,4 @@ USER appuser
 
 EXPOSE 8000
 
-ENTRYPOINT ["bash", "entrypoint.sh"]
+CMD ["python", "-m", "app.startup"]
