@@ -56,6 +56,23 @@ def run_migrations():
     print("[startup] WARNING: Migrations failed, starting server anyway...", flush=True)
 
 
+def run_seed(force: bool = False):
+    """Run the seed script if SEED_ON_START is set or force is True."""
+    should_seed = os.environ.get("SEED_ON_START", "").lower() in ("1", "true", "yes")
+    force_reseed = os.environ.get("FORCE_RESEED", "").lower() in ("1", "true", "yes")
+
+    if should_seed or force or force_reseed:
+        print(f"[startup] Running seed (force={force or force_reseed})...", flush=True)
+        import asyncio
+        from seed import seed
+        asyncio.run(seed(force=force or force_reseed))
+        # Clear the env var so it doesn't reseed on next restart
+        if force_reseed:
+            print("[startup] Seed complete. Clear FORCE_RESEED env var to prevent re-seeding.", flush=True)
+    else:
+        print("[startup] Skipping seed (set SEED_ON_START=1 or FORCE_RESEED=1 to seed)", flush=True)
+
+
 def start_server():
     """Start uvicorn directly (simpler than gunicorn for initial deploy)."""
     port = int(os.environ.get("PORT", "8000"))
@@ -76,6 +93,7 @@ if __name__ == "__main__":
     try:
         derive_sync_url()
         run_migrations()
+        run_seed()
         start_server()
     except Exception as e:
         print(f"[startup] FATAL ERROR: {e}", flush=True)
