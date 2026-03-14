@@ -51,12 +51,44 @@ def _run_migrations():
         logger.warning(f"Could not run migrations (non-fatal): {e}")
 
 
+async def _auto_seed():
+    """Create tables and seed if database is empty (first deploy)."""
+    try:
+        from app.database import get_engine, get_session_factory, Base
+        from sqlalchemy import select, text
+
+        engine = get_engine()
+
+        # Create all tables from ORM models
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables ensured")
+
+        # Check if already seeded
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            result = await db.execute(text("SELECT COUNT(*) FROM sports"))
+            count = result.scalar()
+            if count and count > 0:
+                logger.info("Database already seeded, skipping")
+                return
+
+        # Run seed
+        logger.info("Empty database detected — running seed...")
+        from seed import seed
+        await seed()
+        logger.info("Database seeded successfully")
+    except Exception as e:
+        logger.warning(f"Auto-seed failed (non-fatal): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Combat Sports Rankings backend starting...")
     Path("uploads/media").mkdir(parents=True, exist_ok=True)
-    _run_migrations()
+    _derive_sync_url()
+    await _auto_seed()
     logger.info("Backend ready")
     yield
     # Shutdown
