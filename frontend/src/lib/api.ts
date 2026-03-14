@@ -97,6 +97,7 @@ export const athletes = {
   get: (id: string) => fetchApi(`/athletes/${id}`),
   ratingHistory: (id: string, type = "overall") =>
     fetchApi(`/athletes/${id}/rating-history?rating_type=${type}`),
+  matches: (id: string) => fetchApi(`/athletes/${id}/matches`),
 };
 
 // Leaderboards

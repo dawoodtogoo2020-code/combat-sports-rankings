@@ -16,6 +16,7 @@ export interface Athlete {
   belt_rank_id: string | null;
   years_training: number | null;
   gym_id: string | null;
+  gym_name: string | null;
   elo_rating: number;
   peak_rating: number;
   gi_rating: number;
@@ -155,6 +156,21 @@ export interface Match {
   loser_elo_after: number | null;
   elo_change: number | null;
   created_at: string;
+}
+
+export interface AthleteMatch {
+  id: string;
+  event_name: string | null;
+  event_id: string;
+  match_date: string | null;
+  is_winner: boolean;
+  opponent_name: string;
+  opponent_id: string;
+  outcome: string;
+  submission_type: string | null;
+  round_name: string | null;
+  is_gi: boolean;
+  elo_change: number | null;
 }
 
 export interface RatingPoint {

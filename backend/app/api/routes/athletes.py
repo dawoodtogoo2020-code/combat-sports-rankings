@@ -76,10 +76,14 @@ async def list_athletes(
 @router.get("/{athlete_id}", response_model=AthleteRead)
 @limiter.limit("60/minute")
 async def get_athlete(request: Request, athlete_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Athlete).where(Athlete.id == athlete_id))
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Athlete).options(selectinload(Athlete.gym)).where(Athlete.id == athlete_id)
+    )
     athlete = result.scalar_one_or_none()
     if not athlete:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    athlete.gym_name = athlete.gym.name if athlete.gym else None
     return athlete
 
 
@@ -118,6 +122,54 @@ async def update_athlete(
     await db.flush()
     await db.refresh(athlete)
     return athlete
+
+
+@router.get("/{athlete_id}/matches")
+@limiter.limit("30/minute")
+async def get_athlete_matches(
+    request: Request,
+    athlete_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Get an athlete's match history with opponent details and event info."""
+    from sqlalchemy.orm import selectinload
+    from app.models.match import Match
+    from app.models.event import Event
+
+    query = (
+        select(Match)
+        .options(
+            selectinload(Match.winner),
+            selectinload(Match.loser),
+            selectinload(Match.event),
+        )
+        .where(
+            or_(Match.winner_id == athlete_id, Match.loser_id == athlete_id)
+        )
+        .order_by(Match.match_date.desc().nullslast())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    matches = result.scalars().all()
+
+    return [
+        {
+            "id": str(m.id),
+            "event_name": m.event.name if m.event else None,
+            "event_id": str(m.event_id),
+            "match_date": m.match_date.isoformat() if m.match_date else None,
+            "is_winner": m.winner_id == athlete_id,
+            "opponent_name": m.loser.display_name if m.winner_id == athlete_id else m.winner.display_name,
+            "opponent_id": str(m.loser_id) if m.winner_id == athlete_id else str(m.winner_id),
+            "outcome": m.outcome.value,
+            "submission_type": m.submission_type,
+            "round_name": m.round_name,
+            "is_gi": m.is_gi,
+            "elo_change": m.elo_change if m.winner_id == athlete_id else (-m.elo_change if m.elo_change else None),
+        }
+        for m in matches
+    ]
 
 
 @router.get("/{athlete_id}/rating-history")

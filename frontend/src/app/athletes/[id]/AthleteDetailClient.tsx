@@ -1,10 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useApi } from "@/hooks/useApi";
 import { athletes as athletesApi } from "@/lib/api";
-import type { Athlete, RatingPoint } from "@/types/index";
+import type { Athlete, RatingPoint, AthleteMatch } from "@/types/index";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState, AthletesIcon } from "@/components/ui/EmptyState";
 
@@ -47,9 +48,58 @@ function RatingChart({ points }: { points: RatingPoint[] }) {
   );
 }
 
+function MatchRow({ match }: { match: AthleteMatch }) {
+  const eloStr = match.elo_change
+    ? (match.elo_change > 0 ? `+${match.elo_change.toFixed(1)}` : match.elo_change.toFixed(1))
+    : "";
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-surface-50 dark:hover:bg-surface-800/50">
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${match.is_winner ? "bg-moss-500" : "bg-clay-500"}`}>
+        {match.is_winner ? "W" : "L"}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <Link href={`/athletes/${match.opponent_id}`} className="truncate font-medium text-surface-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400">
+            {match.opponent_name}
+          </Link>
+          <span className="shrink-0 rounded bg-surface-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-surface-500 dark:bg-surface-700 dark:text-surface-400">
+            {match.is_gi ? "Gi" : "No-Gi"}
+          </span>
+        </div>
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-surface-500 dark:text-surface-400">
+          <span className="truncate">{match.event_name}</span>
+          {match.round_name && <span>· {match.round_name}</span>}
+        </div>
+      </div>
+
+      <div className="hidden text-right sm:block">
+        <div className="text-xs font-medium capitalize text-surface-700 dark:text-surface-300">
+          {match.outcome === "submission" && match.submission_type
+            ? match.submission_type
+            : match.outcome}
+        </div>
+        {match.match_date && (
+          <div className="text-[10px] text-surface-400">
+            {new Date(match.match_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+          </div>
+        )}
+      </div>
+
+      {eloStr && (
+        <div className={`shrink-0 font-mono text-xs font-semibold ${match.elo_change && match.elo_change > 0 ? "text-moss-600 dark:text-moss-400" : "text-clay-600 dark:text-clay-400"}`}>
+          {eloStr}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AthleteDetailClient() {
   const params = useParams();
   const id = params?.id as string;
+  const [activeTab, setActiveTab] = useState<"overview" | "matches">("overview");
 
   const { data: athlete, loading } = useApi<Athlete>(
     () => athletesApi.get(id) as Promise<Athlete>,
@@ -57,6 +107,10 @@ export default function AthleteDetailClient() {
   );
   const { data: ratingHistory } = useApi<RatingPoint[]>(
     () => athletesApi.ratingHistory(id) as Promise<RatingPoint[]>,
+    [id]
+  );
+  const { data: matches } = useApi<AthleteMatch[]>(
+    () => athletesApi.matches(id) as Promise<AthleteMatch[]>,
     [id]
   );
 
@@ -94,6 +148,11 @@ export default function AthleteDetailClient() {
   const winRate = athlete.total_matches > 0 ? Math.round((athlete.wins / athlete.total_matches) * 100) : 0;
   const subRate = athlete.wins > 0 ? Math.round((athlete.submissions / athlete.wins) * 100) : 0;
 
+  const tabs = [
+    { key: "overview" as const, label: "Overview" },
+    { key: "matches" as const, label: `Matches (${athlete.total_matches})` },
+  ];
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
       <div className="mb-6">
@@ -120,79 +179,146 @@ export default function AthleteDetailClient() {
               )}
             </div>
             <p className="mt-1 text-surface-500 dark:text-surface-400">
-              {athlete.country || "Unknown"} {athlete.years_training ? `\u00b7 ${athlete.years_training} years training` : ""}
+              {athlete.country || "Unknown"}
+              {athlete.years_training ? ` · ${athlete.years_training} years training` : ""}
+              {athlete.gym_name ? ` · ${athlete.gym_name}` : ""}
             </p>
             {athlete.bio && (
-              <p className="mt-3 text-sm text-surface-600 dark:text-surface-400">{athlete.bio}</p>
+              <p className="mt-3 text-sm text-surface-600 dark:text-surface-400 leading-relaxed">{athlete.bio}</p>
             )}
           </div>
           <div className="text-center sm:text-right">
             <div className="font-mono text-4xl font-bold text-primary-600 dark:text-primary-400">
-              {athlete.elo_rating}
+              {Math.round(athlete.elo_rating)}
             </div>
             <div className="text-sm text-surface-500 dark:text-surface-400">Overall ELO</div>
             <div className="mt-2 text-xs text-surface-400 dark:text-surface-500">
-              Peak: {athlete.peak_rating}
+              Peak: {Math.round(athlete.peak_rating)}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Stats */}
-        <div className="card lg:col-span-1">
-          <h2 className="mb-4 text-lg font-semibold text-surface-900 dark:text-white">Statistics</h2>
-          <div className="space-y-3">
-            {[
-              { label: "Total Matches", value: athlete.total_matches },
-              { label: "Wins", value: athlete.wins, className: "text-moss-600 dark:text-moss-400" },
-              { label: "Losses", value: athlete.losses, className: "text-clay-600 dark:text-clay-400" },
-              { label: "Draws", value: athlete.draws },
-              { label: "Submissions", value: athlete.submissions },
-              { label: "Win Rate", value: `${winRate}%` },
-              { label: "Sub Rate", value: `${subRate}%` },
-              { label: "Gi Rating", value: athlete.gi_rating },
-              { label: "No-Gi Rating", value: athlete.nogi_rating },
-              { label: "Competitor Points", value: athlete.competitor_points },
-            ].map((stat) => (
-              <div key={stat.label} className="flex items-center justify-between">
-                <span className="text-sm text-surface-500 dark:text-surface-400">{stat.label}</span>
-                <span className={`font-mono text-sm font-semibold ${stat.className || "text-surface-900 dark:text-white"}`}>
-                  {stat.value}
-                </span>
+      {/* Tabs */}
+      <div className="mb-6 flex gap-1 rounded-lg bg-surface-100 p-1 dark:bg-surface-800">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab.key
+                ? "bg-white text-surface-900 shadow-sm dark:bg-surface-700 dark:text-white"
+                : "text-surface-500 hover:text-surface-700 dark:text-surface-400 dark:hover:text-surface-300"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === "overview" && (
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Stats */}
+          <div className="card lg:col-span-1">
+            <h2 className="mb-4 text-lg font-semibold text-surface-900 dark:text-white">Statistics</h2>
+            <div className="space-y-3">
+              {[
+                { label: "Total Matches", value: athlete.total_matches },
+                { label: "Wins", value: athlete.wins, className: "text-moss-600 dark:text-moss-400" },
+                { label: "Losses", value: athlete.losses, className: "text-clay-600 dark:text-clay-400" },
+                { label: "Draws", value: athlete.draws },
+                { label: "Submissions", value: athlete.submissions },
+                { label: "Win Rate", value: `${winRate}%` },
+                { label: "Sub Rate", value: `${subRate}%` },
+                { label: "Gi Rating", value: Math.round(athlete.gi_rating) },
+                { label: "No-Gi Rating", value: Math.round(athlete.nogi_rating) },
+              ].map((stat) => (
+                <div key={stat.label} className="flex items-center justify-between">
+                  <span className="text-sm text-surface-500 dark:text-surface-400">{stat.label}</span>
+                  <span className={`font-mono text-sm font-semibold ${stat.className || "text-surface-900 dark:text-white"}`}>
+                    {stat.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {athlete.total_matches > 0 && (
+              <div className="mt-6">
+                <div className="mb-1.5 flex justify-between text-xs text-surface-500">
+                  <span>{athlete.wins}W</span>
+                  <span>{athlete.losses}L</span>
+                </div>
+                <div className="flex h-2 overflow-hidden rounded-full bg-surface-100 dark:bg-surface-700">
+                  <div className="rounded-full bg-moss-500" style={{ width: `${winRate}%` }} />
+                  <div className="rounded-full bg-clay-400" style={{ width: `${100 - winRate}%` }} />
+                </div>
               </div>
-            ))}
+            )}
+
+            {athlete.gym_name && athlete.gym_id && (
+              <div className="mt-6 rounded-lg border border-surface-200 p-3 dark:border-surface-700">
+                <div className="text-xs font-medium uppercase tracking-wider text-surface-400 dark:text-surface-500">Team</div>
+                <Link href={`/gyms/${athlete.gym_id}`} className="mt-1 block font-medium text-surface-900 hover:text-primary-600 dark:text-white dark:hover:text-primary-400">
+                  {athlete.gym_name}
+                </Link>
+              </div>
+            )}
           </div>
 
-          {/* Win/Loss bar */}
-          {athlete.total_matches > 0 && (
-            <div className="mt-6">
-              <div className="mb-1.5 flex justify-between text-xs text-surface-500">
-                <span>{athlete.wins}W</span>
-                <span>{athlete.losses}L</span>
+          {/* Rating Graph */}
+          <div className="card lg:col-span-2">
+            <h2 className="mb-4 text-lg font-semibold text-surface-900 dark:text-white">Rating Progression</h2>
+            {ratingHistory && ratingHistory.length >= 2 ? (
+              <div className="mb-2">
+                <RatingChart points={ratingHistory} />
               </div>
-              <div className="flex h-2 overflow-hidden rounded-full bg-surface-100 dark:bg-surface-700">
-                <div className="rounded-full bg-moss-500" style={{ width: `${winRate}%` }} />
-                <div className="rounded-full bg-clay-400" style={{ width: `${100 - winRate}%` }} />
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-surface-400">
+                Rating history will appear after multiple competitions
               </div>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* Rating Graph */}
-        <div className="card lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-surface-900 dark:text-white">Rating Progression</h2>
-          {ratingHistory && ratingHistory.length >= 2 ? (
-            <div className="mb-2">
-              <RatingChart points={ratingHistory} />
+            {matches && matches.length > 0 && (
+              <div className="mt-6 border-t border-surface-100 pt-4 dark:border-surface-800">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-surface-700 dark:text-surface-300">Recent Results</h3>
+                  <button
+                    onClick={() => setActiveTab("matches")}
+                    className="text-xs text-primary-600 hover:text-primary-500 dark:text-primary-400"
+                  >
+                    View all &rarr;
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {matches.slice(0, 5).map((m) => (
+                    <MatchRow key={m.id} match={m} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "matches" && (
+        <div className="card">
+          <h2 className="mb-4 text-lg font-semibold text-surface-900 dark:text-white">
+            Match History
+          </h2>
+          {matches && matches.length > 0 ? (
+            <div className="space-y-1">
+              {matches.map((m) => (
+                <MatchRow key={m.id} match={m} />
+              ))}
             </div>
           ) : (
             <div className="flex h-40 items-center justify-center text-sm text-surface-400">
-              Rating history will appear after multiple competitions
+              No matches recorded yet
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -38,6 +38,7 @@ class AthleteRead(BaseModel):
     belt_rank_id: uuid.UUID | None = None
     years_training: int | None = None
     gym_id: uuid.UUID | None = None
+    gym_name: str | None = None
     elo_rating: float
     peak_rating: float
     gi_rating: float
