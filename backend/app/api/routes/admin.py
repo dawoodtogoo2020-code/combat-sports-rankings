@@ -24,6 +24,46 @@ router = APIRouter()
 elo_engine = EloEngine()
 
 
+@router.post("/seed", summary="Run database seed (one-time setup)")
+async def run_seed():
+    """Create tables and seed with initial data. Safe to call multiple times."""
+    import importlib.util
+    import traceback
+    from pathlib import Path
+    from app.database import get_engine, get_session_factory, Base
+    from sqlalchemy import text
+    import app.models  # noqa
+
+    try:
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        # Check if already seeded
+        session_factory = get_session_factory()
+        async with session_factory() as db:
+            try:
+                result = await db.execute(text("SELECT COUNT(*) FROM sports"))
+                count = result.scalar()
+                if count and count > 0:
+                    return {"status": "already_seeded", "sports_count": count}
+            except Exception:
+                pass
+
+        # Find and run seed.py
+        for p in [Path("/app/seed.py"), Path("seed.py")]:
+            if p.exists():
+                spec = importlib.util.spec_from_file_location("seed_module", str(p))
+                seed_mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(seed_mod)
+                await seed_mod.seed()
+                return {"status": "seeded", "message": "Database seeded successfully"}
+
+        return {"status": "error", "message": "seed.py not found"}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "traceback": traceback.format_exc()}
+
+
 class DashboardStats(BaseModel):
     total_athletes: int
     total_gyms: int
