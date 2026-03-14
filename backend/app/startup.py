@@ -1,12 +1,23 @@
 """
 Production startup script — replaces entrypoint.sh to avoid shell issues.
-Runs migrations then starts gunicorn.
+Runs migrations then starts uvicorn.
 """
 
 import os
-import subprocess
 import sys
-import time
+import traceback
+
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+print("=" * 50, flush=True)
+print("COMBAT SPORTS RANKINGS — STARTING", flush=True)
+print(f"Python: {sys.version}", flush=True)
+print(f"CWD: {os.getcwd()}", flush=True)
+print(f"PORT env: {os.environ.get('PORT', 'NOT SET')}", flush=True)
+print(f"DATABASE_URL set: {'yes' if os.environ.get('DATABASE_URL') else 'NO'}", flush=True)
+print("=" * 50, flush=True)
 
 
 def derive_sync_url():
@@ -19,12 +30,15 @@ def derive_sync_url():
         elif "asyncpg" in sync_url:
             sync_url = sync_url.replace("postgresql+asyncpg://", "postgresql://", 1)
         os.environ["DATABASE_URL_SYNC"] = sync_url
-        print(f"Auto-derived DATABASE_URL_SYNC from DATABASE_URL")
+        print("[startup] Auto-derived DATABASE_URL_SYNC", flush=True)
 
 
 def run_migrations():
-    """Run alembic migrations with retry."""
-    print("Running database migrations...")
+    """Run alembic migrations — skip if they fail."""
+    import subprocess
+    import time
+
+    print("[startup] Running database migrations...", flush=True)
     for attempt in range(2):
         result = subprocess.run(
             ["alembic", "upgrade", "head"],
@@ -32,49 +46,38 @@ def run_migrations():
             text=True,
         )
         if result.returncode == 0:
-            print("Migrations complete.")
+            print("[startup] Migrations complete.", flush=True)
             return
-        print(f"Migration attempt {attempt + 1} failed: {result.stderr}")
+        print(f"[startup] Migration attempt {attempt + 1} failed:", flush=True)
+        print(f"  stdout: {result.stdout[:500]}", flush=True)
+        print(f"  stderr: {result.stderr[:500]}", flush=True)
         if attempt == 0:
-            print("Retrying in 5 seconds...")
-            time.sleep(5)
-    print("WARNING: Migrations failed, starting server anyway...")
-
-
-def run_seed():
-    """Run seed script if RUN_SEED=true."""
-    if os.environ.get("RUN_SEED", "").lower() == "true":
-        print("Seeding database...")
-        result = subprocess.run(
-            [sys.executable, "seed.py"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"Seed failed (may already be seeded): {result.stderr[:200]}")
-        else:
-            print("Seeding complete.")
+            time.sleep(3)
+    print("[startup] WARNING: Migrations failed, starting server anyway...", flush=True)
 
 
 def start_server():
-    """Start gunicorn with uvicorn workers."""
-    port = os.environ.get("PORT", "8000")
-    print(f"Starting server on port {port}...")
-    os.execvp("gunicorn", [
-        "gunicorn",
+    """Start uvicorn directly (simpler than gunicorn for initial deploy)."""
+    port = int(os.environ.get("PORT", "8000"))
+    print(f"[startup] Starting uvicorn on 0.0.0.0:{port}", flush=True)
+
+    import uvicorn
+    uvicorn.run(
         "app.main:app",
-        "-w", "2",
-        "-k", "uvicorn.workers.UvicornWorker",
-        "--bind", f"0.0.0.0:{port}",
-        "--timeout", "120",
-        "--access-logfile", "-",
-        "--error-logfile", "-",
-    ])
+        host="0.0.0.0",
+        port=port,
+        workers=1,
+        log_level="info",
+        access_log=True,
+    )
 
 
 if __name__ == "__main__":
-    print("Starting Combat Sports Rankings backend...")
-    derive_sync_url()
-    run_migrations()
-    run_seed()
-    start_server()
+    try:
+        derive_sync_url()
+        run_migrations()
+        start_server()
+    except Exception as e:
+        print(f"[startup] FATAL ERROR: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
