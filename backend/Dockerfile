@@ -26,4 +26,5 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["python", "/app/app/startup.py"]
+# Default CMD — Railway overrides via startCommand in railway.toml
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

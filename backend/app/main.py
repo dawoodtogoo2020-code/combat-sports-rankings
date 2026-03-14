@@ -1,24 +1,66 @@
+import logging
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+
 from app.config import get_settings
 from app.api.routes import api_router
 from app.middleware.rate_limit import limiter
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _derive_sync_url():
+    """Auto-derive DATABASE_URL_SYNC from DATABASE_URL for alembic."""
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not os.environ.get("DATABASE_URL_SYNC") and db_url:
+        sync_url = db_url
+        if sync_url.startswith("postgres://"):
+            sync_url = sync_url.replace("postgres://", "postgresql://", 1)
+        elif "asyncpg" in sync_url:
+            sync_url = sync_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        os.environ["DATABASE_URL_SYNC"] = sync_url
+        logger.info("Auto-derived DATABASE_URL_SYNC")
+
+
+def _run_migrations():
+    """Run alembic migrations. Non-fatal if they fail."""
+    try:
+        _derive_sync_url()
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            logger.info("Database migrations completed successfully")
+        else:
+            logger.warning(f"Migrations failed (non-fatal): {result.stderr[:300]}")
+    except Exception as e:
+        logger.warning(f"Could not run migrations (non-fatal): {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup — ensure upload directory exists
+    # Startup
+    logger.info("Combat Sports Rankings backend starting...")
     Path("uploads/media").mkdir(parents=True, exist_ok=True)
+    _run_migrations()
+    logger.info("Backend ready")
     yield
     # Shutdown
+    logger.info("Backend shutting down")
 
 
 app = FastAPI(
@@ -52,7 +94,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
-# Health check
+# Health check — must respond quickly, no DB dependency
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": settings.app_name}
