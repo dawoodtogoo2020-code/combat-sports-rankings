@@ -1,6 +1,6 @@
 import uuid
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -25,7 +25,7 @@ def slugify(text: str) -> str:
 @router.get("/", response_model=list[GymRead])
 @limiter.limit("30/minute")
 async def list_gyms(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     search: str | None = Query(None, max_length=200),
     country: str | None = Query(None, max_length=100),
@@ -49,7 +49,7 @@ async def list_gyms(
 
 @router.get("/{gym_id}", response_model=GymRead)
 @limiter.limit("60/minute")
-async def get_gym(request, gym_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_gym(request: Request, gym_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Gym).where(Gym.id == gym_id))
     gym = result.scalar_one_or_none()
     if not gym:
@@ -100,7 +100,7 @@ async def update_gym(
 @router.get("/{gym_id}/athletes", response_model=list[AthleteListItem])
 @limiter.limit("30/minute")
 async def get_gym_athletes(
-    request,
+    request: Request,
     gym_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),

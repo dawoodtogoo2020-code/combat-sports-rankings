@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("/", response_model=list[AthleteListItem])
 @limiter.limit("30/minute")
 async def list_athletes(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     search: str | None = Query(None, max_length=200),
     sport_id: uuid.UUID | None = None,
@@ -75,7 +75,7 @@ async def list_athletes(
 
 @router.get("/{athlete_id}", response_model=AthleteRead)
 @limiter.limit("60/minute")
-async def get_athlete(request, athlete_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_athlete(request: Request, athlete_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Athlete).where(Athlete.id == athlete_id))
     athlete = result.scalar_one_or_none()
     if not athlete:
@@ -123,7 +123,7 @@ async def update_athlete(
 @router.get("/{athlete_id}/rating-history")
 @limiter.limit("30/minute")
 async def get_rating_history(
-    request,
+    request: Request,
     athlete_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     rating_type: str = Query("overall", pattern=r"^(overall|gi|nogi)$"),

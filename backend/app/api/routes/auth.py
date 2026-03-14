@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -29,7 +29,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 @limiter.limit("5/minute")
-async def register(request, data: UserCreate, db: AsyncSession = Depends(get_db)):
+async def register(request: Request, data: UserCreate, db: AsyncSession = Depends(get_db)):
     # Check existing
     existing = await db.execute(
         select(User).where((User.email == data.email) | (User.username == data.username))
@@ -51,7 +51,7 @@ async def register(request, data: UserCreate, db: AsyncSession = Depends(get_db)
 
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
-async def login(request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == data.email))
     user = result.scalar_one_or_none()
     if not user or not verify_password(data.password, user.hashed_password):

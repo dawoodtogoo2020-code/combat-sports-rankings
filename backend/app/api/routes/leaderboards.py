@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("/global", response_model=LeaderboardResponse)
 @limiter.limit("30/minute")
 async def global_leaderboard(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     sport_id: uuid.UUID | None = None,
     weight_class_id: uuid.UUID | None = None,
@@ -115,7 +115,7 @@ async def global_leaderboard(
 @router.get("/country/{country_code}", response_model=LeaderboardResponse)
 @limiter.limit("30/minute")
 async def country_leaderboard(
-    request,
+    request: Request,
     country_code: str,
     db: AsyncSession = Depends(get_db),
     gender: str | None = Query(None, pattern=r"^(male|female|other)$"),

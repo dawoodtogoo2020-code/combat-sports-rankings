@@ -1,6 +1,6 @@
 import uuid
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -26,7 +26,7 @@ def slugify(text: str) -> str:
 @router.get("/", response_model=list[EventRead])
 @limiter.limit("30/minute")
 async def list_events(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     search: str | None = Query(None, max_length=200),
     sport_id: uuid.UUID | None = None,
@@ -56,7 +56,7 @@ async def list_events(
 
 @router.get("/{event_id}", response_model=EventRead)
 @limiter.limit("60/minute")
-async def get_event(request, event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_event(request: Request, event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Event).where(Event.id == event_id))
     event = result.scalar_one_or_none()
     if not event:
@@ -106,7 +106,7 @@ async def update_event(
 @router.get("/{event_id}/matches")
 @limiter.limit("30/minute")
 async def get_event_matches(
-    request,
+    request: Request,
     event_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),

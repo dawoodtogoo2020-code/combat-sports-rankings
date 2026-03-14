@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -20,7 +20,7 @@ elo_engine = EloEngine()
 @router.get("/", response_model=list[MatchRead])
 @limiter.limit("30/minute")
 async def list_matches(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     athlete_id: uuid.UUID | None = None,
     event_id: uuid.UUID | None = None,
@@ -43,7 +43,7 @@ async def list_matches(
 
 @router.get("/{match_id}", response_model=MatchRead)
 @limiter.limit("60/minute")
-async def get_match(request, match_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_match(request: Request, match_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Match).where(Match.id == match_id))
     match = result.scalar_one_or_none()
     if not match:

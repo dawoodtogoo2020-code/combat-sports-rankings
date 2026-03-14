@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -15,7 +15,7 @@ router = APIRouter()
 @router.get("/feed", response_model=list[PostRead])
 @limiter.limit("30/minute")
 async def get_feed(
-    request,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
@@ -125,7 +125,7 @@ async def toggle_like(
 @router.get("/posts/{post_id}/comments", response_model=list[CommentRead])
 @limiter.limit("30/minute")
 async def get_comments(
-    request,
+    request: Request,
     post_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
