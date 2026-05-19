@@ -19,6 +19,24 @@ from app.middleware.rate_limit import limiter
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+_SENTRY_DSN = os.environ.get("SENTRY_DSN")
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            environment=os.environ.get("SENTRY_ENV", os.environ.get("APP_ENV", "production")),
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            send_default_pii=False,
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+        )
+        logger.info("Sentry initialized")
+    except Exception as e:
+        logger.warning(f"Sentry init failed (non-fatal): {e}")
+
 
 def _derive_sync_url():
     """Auto-derive DATABASE_URL_SYNC from DATABASE_URL for alembic."""

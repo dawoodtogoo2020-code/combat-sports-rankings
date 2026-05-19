@@ -37,6 +37,9 @@ orjson==3.10.13
 # Rate limiting
 slowapi==0.1.9
 
+# Observability
+sentry-sdk[fastapi]==2.20.0
+
 # CSV/data
 pandas==2.2.3
 
