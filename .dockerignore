@@ -1,0 +1,16 @@
+# Build artifacts and local-only files that shouldn't ship to Fly/Railway/Docker
+frontend/node_modules
+frontend/.next
+frontend/out
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.git
+.github
+.venv
+venv
+*.log
+.env
+.env.local
+.env.*.local
+uploads/

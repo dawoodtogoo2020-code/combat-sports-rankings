@@ -1,0 +1,49 @@
+# Fly.io app config for the CS Rankings backend.
+# Replace `app` below with your chosen name after running `fly launch`.
+# Deploy: `fly deploy` from the project root.
+# Secrets: set with `fly secrets set KEY=value` (see .env.example for the full list).
+
+app = "cs-rankings-backend"
+primary_region = "iad"  # Ashburn, VA — pick the region closest to your Supabase project
+
+[build]
+  dockerfile = "backend/Dockerfile"
+  # Build context is the project root so the Dockerfile can COPY backend/
+
+[env]
+  PORT = "8000"
+  APP_ENV = "production"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # keep one warm to avoid cold starts on the API path
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# To run the Celery beat scheduler as a separate process group, uncomment below
+# and run `fly deploy`. Requires a separate Redis instance (Upstash free tier works).
+# [processes]
+#   app = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+#   worker = "celery -A app.celery_app worker --loglevel=info"
+#   beat = "celery -A app.celery_app beat --loglevel=info"

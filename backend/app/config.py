@@ -20,11 +20,17 @@ class Settings(BaseSettings):
     # Redis (optional in production — scraping works without it)
     redis_url: str = "redis://localhost:6379/0"
 
-    # JWT
+    # JWT (our own — issued on /auth/login and /auth/supabase)
     jwt_secret_key: str = "change-me-to-a-random-secret-in-production"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
+    jwt_access_token_expire_minutes: int = 60 * 24  # 24h — long-lived since Supabase handles re-auth
     jwt_refresh_token_expire_days: int = 7
+
+    # Supabase — set both to enable token-exchange auth (Google/GitHub/email sign-in)
+    # SUPABASE_URL is your project URL (e.g. https://xyz.supabase.co)
+    # SUPABASE_JWT_SECRET is the project's JWT secret (Settings → API → JWT Settings)
+    supabase_url: str = ""
+    supabase_jwt_secret: str = ""
 
     # Rate Limiting
     rate_limit_per_minute: int = 60
@@ -37,19 +43,30 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def fix_database_urls(self):
-        """Auto-convert DATABASE_URL from Railway format.
-        Railway gives postgresql://, we need postgresql+asyncpg:// for async
-        and postgresql:// for sync (alembic).
+        """Normalize DATABASE_URL across hosts.
+        Hosts give us postgresql:// (or the legacy postgres://). We need
+        postgresql+asyncpg:// for async and postgresql:// for sync (alembic).
+        Supabase requires sslmode=require — we add it if missing.
         """
         url = self.database_url
-        # If Railway gave us a plain postgresql:// URL, derive both variants
-        if url.startswith("postgresql://") and "+asyncpg" not in url:
-            self.database_url_sync = url
-            self.database_url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        elif url.startswith("postgres://"):
-            # Older Railway format
-            self.database_url_sync = url.replace("postgres://", "postgresql://", 1)
-            self.database_url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        # Legacy postgres:// form (older Railway, older Heroku)
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+
+        # Derive sync variant first (plain postgresql://)
+        sync_url = url if "+asyncpg" not in url else url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+        # Supabase + most managed Postgres hosts require SSL
+        if ("supabase.co" in sync_url or "supabase.com" in sync_url) and "sslmode=" not in sync_url:
+            sep = "&" if "?" in sync_url else "?"
+            sync_url = f"{sync_url}{sep}sslmode=require"
+
+        self.database_url_sync = sync_url
+        # Async variant for SQLAlchemy + asyncpg
+        async_url = sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # asyncpg uses `ssl=require` not `sslmode=require` in the URL
+        async_url = async_url.replace("sslmode=require", "ssl=require")
+        self.database_url = async_url
         return self
 
 

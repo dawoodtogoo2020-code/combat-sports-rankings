@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
 import { auth as authApi } from "@/lib/api";
+import { getSupabase, isSupabaseEnabled } from "@/lib/supabase";
 
 interface User {
   id: string;
@@ -13,13 +14,18 @@ interface User {
   is_active: boolean;
 }
 
+type OAuthProvider = "google" | "github";
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
   error: string | null;
+  supabaseEnabled: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (data: { email: string; username: string; password: string; full_name: string }) => Promise<void>;
+  signInWithOAuth: (provider: OAuthProvider) => Promise<void>;
+  signInWithMagicLink: (email: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
 }
@@ -28,8 +34,6 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const TOKEN_KEY = "cs_rankings_token";
 const REFRESH_KEY = "cs_rankings_refresh";
-
-// Refresh the access token 2 minutes before it expires (28 min for 30 min tokens)
 const REFRESH_INTERVAL_MS = 28 * 60 * 1000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -38,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const supabaseEnabled = isSupabaseEnabled();
 
   const clearRefreshTimer = useCallback(() => {
     if (refreshTimerRef.current) {
@@ -48,9 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const storeTokens = useCallback((accessToken: string, refreshToken?: string) => {
     localStorage.setItem(TOKEN_KEY, accessToken);
-    if (refreshToken) {
-      localStorage.setItem(REFRESH_KEY, refreshToken);
-    }
+    if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
     setToken(accessToken);
   }, []);
 
@@ -62,50 +66,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearRefreshTimer();
   }, [clearRefreshTimer]);
 
-  // Schedule automatic token refresh
   const scheduleRefresh = useCallback(() => {
     clearRefreshTimer();
     refreshTimerRef.current = setInterval(async () => {
-      const storedRefresh = localStorage.getItem(REFRESH_KEY);
-      if (!storedRefresh) return;
-
       try {
-        // Re-login silently using refresh token
-        // Since the backend doesn't have a dedicated refresh endpoint,
-        // we validate the current token and keep using it until expiry
         const currentToken = localStorage.getItem(TOKEN_KEY);
         if (currentToken) {
           await authApi.me(currentToken);
-          // Token still valid, nothing to do
         }
       } catch {
-        // Token expired and refresh failed — clear silently
         clearTokens();
       }
     }, REFRESH_INTERVAL_MS);
   }, [clearRefreshTimer, clearTokens]);
 
-  // On mount, check for stored token and validate it
+  // Bootstrap: check stored token, also check for a Supabase session (handles
+  // OAuth redirect flows where the browser comes back with a fragment-encoded
+  // session that Supabase auto-detects).
   useEffect(() => {
-    const stored = localStorage.getItem(TOKEN_KEY);
-    if (stored) {
-      setToken(stored);
-      authApi
-        .me(stored)
-        .then((userData) => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      // 1) Already have our JWT? Validate it.
+      const stored = localStorage.getItem(TOKEN_KEY);
+      if (stored) {
+        setToken(stored);
+        try {
+          const userData = await authApi.me(stored);
+          if (cancelled) return;
           setUser(userData as User);
           scheduleRefresh();
-        })
-        .catch(() => {
+          setIsLoading(false);
+          return;
+        } catch {
+          if (cancelled) return;
           clearTokens();
-        })
-        .finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
+        }
+      }
 
-    return () => clearRefreshTimer();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+      // 2) No JWT — check if Supabase has a fresh session (e.g. from OAuth callback)
+      const sb = getSupabase();
+      if (sb) {
+        const { data } = await sb.auth.getSession();
+        const sbToken = data.session?.access_token;
+        if (sbToken && !cancelled) {
+          try {
+            const tokens = await authApi.supabase(sbToken);
+            if (cancelled) return;
+            storeTokens(tokens.access_token, tokens.refresh_token);
+            const userData = await authApi.me(tokens.access_token);
+            if (cancelled) return;
+            setUser(userData as User);
+            scheduleRefresh();
+          } catch (e) {
+            console.warn("Supabase token exchange failed during bootstrap", e);
+          }
+        }
+      }
+
+      if (!cancelled) setIsLoading(false);
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+      clearRefreshTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
@@ -113,7 +141,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await authApi.login({ email, password });
       storeTokens(res.access_token, res.refresh_token);
-
       const userData = await authApi.me(res.access_token);
       setUser(userData as User);
       scheduleRefresh();
@@ -132,7 +159,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       try {
         await authApi.register(data);
-        // Auto-login after registration
         await login(data.email, data.password);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Registration failed";
@@ -144,7 +170,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [login]
   );
 
+  const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
+    setError(null);
+    const sb = getSupabase();
+    if (!sb) {
+      setError("Social sign-in is not configured");
+      throw new Error("Supabase not configured");
+    }
+    const { error: oauthError } = await sb.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    });
+    if (oauthError) {
+      setError(oauthError.message);
+      throw oauthError;
+    }
+    // Browser will redirect away; bootstrap effect picks up the session on return.
+  }, []);
+
+  const signInWithMagicLink = useCallback(async (email: string) => {
+    setError(null);
+    const sb = getSupabase();
+    if (!sb) {
+      setError("Magic-link sign-in is not configured");
+      throw new Error("Supabase not configured");
+    }
+    const { error: magicError } = await sb.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    });
+    if (magicError) {
+      setError(magicError.message);
+      throw magicError;
+    }
+  }, []);
+
   const logout = useCallback(() => {
+    const sb = getSupabase();
+    if (sb) {
+      sb.auth.signOut().catch(() => {});
+    }
     clearTokens();
     setError(null);
   }, [clearTokens]);
@@ -152,7 +221,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, error, login, register, logout, clearError }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        isLoading,
+        error,
+        supabaseEnabled,
+        login,
+        register,
+        signInWithOAuth,
+        signInWithMagicLink,
+        logout,
+        clearError,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -20,12 +20,18 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Nullable: users who signed up via Supabase OAuth (Google/GitHub) have no local password
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SAEnum(UserRole), default=UserRole.USER, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Supabase user UUID — set when the account was created via Supabase Auth.
+    # A user can have both a hashed_password (legacy login) and a supabase_user_id
+    # (after linking) — we authenticate by email match.
+    supabase_user_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    auth_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)  # "password", "google", "github", "email"
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

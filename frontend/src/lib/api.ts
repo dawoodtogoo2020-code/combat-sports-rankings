@@ -85,6 +85,12 @@ export const auth = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  /** Exchange a Supabase access token for our own JWT after OAuth/magic-link sign-in. */
+  supabase: (access_token: string) =>
+    fetchApi<{ access_token: string; refresh_token: string }>("/auth/supabase", {
+      method: "POST",
+      body: JSON.stringify({ access_token }),
+    }),
   me: (token: string) => fetchApi("/auth/me", { token }),
 };
 
